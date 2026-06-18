@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react';
 import { collection, onSnapshot, addDoc } from 'firebase/firestore';
 import { db } from '../firebase';
+import { QRCodeSVG } from 'qrcode.react';
 
 function PanelMaestro() {
   const [restaurantes, setRestaurantes] = useState([]);
   const [nombre, setNombre] = useState('');
+  const [mesasPor, setMesasPor] = useState({});
 
   useEffect(() => {
     const unsubscribe = onSnapshot(collection(db, 'restaurantes'), (snapshot) => {
@@ -20,7 +22,7 @@ function PanelMaestro() {
     setNombre('');
   }
 
-  return (
+return (
   <div className="min-h-screen bg-neutral-950 text-white font-serif">
     {/* Header */}
     <div className="bg-neutral-900 border-b border-neutral-800 px-6 py-4">
@@ -56,7 +58,32 @@ function PanelMaestro() {
             <div className="flex gap-4 mt-3 text-xs text-amber-400">
               <a href={`/restaurante/${r.id}/admin`} className="hover:underline">Admin →</a>
               <a href={`/restaurante/${r.id}/cocina`} className="hover:underline">Cocina →</a>
-              <a href={`/restaurante/${r.id}/mesa/1`} className="hover:underline">Mesa 1 →</a>
+            </div>
+
+            {/* Generador de QR */}
+            <div className="mt-4 flex items-center gap-3">
+              <input
+                type="number"
+                placeholder="Número de mesas"
+                className="bg-neutral-900 border border-neutral-700 px-3 py-1 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400 w-40 text-sm"
+                onChange={(e) => setMesasPor({ ...mesasPor, [r.id]: Number(e.target.value) })}
+              />
+              <span className="text-neutral-500 text-xs">mesas</span>
+            </div>
+
+            {/* QR por mesa */}
+            <div className="flex flex-wrap gap-6 mt-4">
+              {Array.from({ length: mesasPor[r.id] || 0 }, (_, i) => i + 1).map((mesa) => (
+                <div key={mesa} className="flex flex-col items-center gap-2">
+                  <QRCodeSVG
+                    value={`https://mesadigital-pi.vercel.app/restaurante/${r.id}/mesa/${mesa}`}
+                    size={100}
+                    bgColor="#ffffff"
+                    fgColor="#000000"
+                  />
+                  <p className="text-xs text-neutral-400">Mesa {mesa}</p>
+                </div>
+              ))}
             </div>
           </div>
         ))}
@@ -66,4 +93,5 @@ function PanelMaestro() {
 );
 }
 
-export default PanelMaestro;
+export default
+PanelMaestro;
