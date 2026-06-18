@@ -39,26 +39,53 @@ function Menu() {
   }
 
   return (
-    <div>
-      <h1>MesaDigital — Mesa {numeroMesa}</h1>
-      <ul>
-        {platos.map((plato) => (
-          <li key={plato.id}>
-            {plato.nombre} - RD${plato.precio}
-            <button onClick={() => agregarAlCarrito(plato)}>Agregar</button>
-          </li>
-        ))}
-      </ul>
-      <h3>Tu pedido:</h3>
-      <ul>
-        {carrito.map((item, index) => (
-          <li key={index}>{item.nombre} - RD${item.precio}</li>
-        ))}
-      </ul>
-      <p>Total: RD${total}</p>
-      <button onClick={enviarPedido}>Enviar pedido</button>
+  <div className="min-h-screen bg-neutral-950 text-white font-serif">
+    {/* Header */}
+    <div className="relative h-48 flex items-end justify-center pb-6"
+      style={{ background: 'linear-gradient(to bottom, #1a0a00, #0a0a0a)' }}>
+      <div className="text-center">
+        <p className="text-amber-400 text-sm tracking-widest uppercase">Bienvenido</p>
+        <h1 className="text-3xl font-bold tracking-wide">Mesa {numeroMesa}</h1>
+      </div>
     </div>
-  );
+
+    {/* Platos */}
+    <div className="max-w-lg mx-auto px-4 py-6 space-y-4">
+      {platos.map((plato) => (
+        <div key={plato.id}
+          className="flex justify-between items-center border-b border-neutral-800 pb-4">
+          <div>
+            <p className="text-lg font-semibold">{plato.nombre}</p>
+            <p className="text-neutral-400 text-sm">{plato.descripcion}</p>
+            <p className="text-amber-400 mt-1">RD${plato.precio}</p>
+          </div>
+          <button
+            onClick={() => agregarAlCarrito(plato)}
+            className="ml-4 border border-amber-400 text-amber-400 px-3 py-1 text-sm hover:bg-amber-400 hover:text-black transition-colors">
+            + Agregar
+          </button>
+        </div>
+      ))}
+    </div>
+
+    {/* Carrito */}
+    {carrito.length > 0 && (
+      <div className="fixed bottom-0 left-0 right-0 bg-neutral-900 border-t border-neutral-800 p-4">
+        <div className="max-w-lg mx-auto">
+          <p className="text-sm text-neutral-400 mb-1">{carrito.length} ítem(s) en tu pedido</p>
+          <div className="flex justify-between items-center">
+            <p className="text-xl font-bold text-amber-400">RD${total}</p>
+            <button
+              onClick={enviarPedido}
+              className="bg-amber-400 text-black px-6 py-2 font-bold hover:bg-amber-300 transition-colors">
+              Enviar pedido
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+  </div>
+);
 }
 
 export default Menu;

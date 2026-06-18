@@ -20,24 +20,45 @@ function Cocina() {
   }
 
   return (
-    <div>
-      <h1>Cocina</h1>
+  <div className="min-h-screen bg-neutral-950 text-white font-serif">
+    {/* Header */}
+    <div className="bg-neutral-900 border-b border-neutral-800 px-6 py-4">
+      <p className="text-amber-400 text-xs tracking-widest uppercase">Panel de</p>
+      <h1 className="text-2xl font-bold">Cocina</h1>
+    </div>
+
+    {/* Pedidos */}
+    <div className="max-w-2xl mx-auto px-4 py-6 space-y-4">
+      {pedidos.length === 0 && (
+        <p className="text-neutral-500 text-center mt-20">Sin pedidos por el momento</p>
+      )}
       {pedidos.map((pedido) => (
-        <div key={pedido.id} style={{ border: '1px solid #ccc', margin: 10, padding: 10 }}>
-          <strong>Mesa {pedido.mesa}</strong> — {pedido.estado}
-          <ul>
+        <div key={pedido.id}
+          className={`border p-4 ${pedido.estado === 'pendiente' ? 'border-amber-400' : 'border-neutral-700 opacity-50'}`}>
+          <div className="flex justify-between items-center mb-2">
+            <h2 className="text-lg font-bold">Mesa {pedido.mesa}</h2>
+            <span className={`text-xs tracking-widest uppercase px-2 py-1 ${pedido.estado === 'pendiente' ? 'bg-amber-400 text-black' : 'bg-neutral-700 text-neutral-400'}`}>
+              {pedido.estado}
+            </span>
+          </div>
+          <ul className="text-neutral-300 text-sm space-y-1 mb-3">
             {pedido.items.map((item, i) => (
-              <li key={i}>{item.nombre} - RD${item.precio}</li>
+              <li key={i}>{item.nombre} — RD${item.precio}</li>
             ))}
           </ul>
-          <p>Total: RD${pedido.total}</p>
+          <p className="text-amber-400 font-bold">Total: RD${pedido.total}</p>
           {pedido.estado === 'pendiente' && (
-            <button onClick={() => marcarListo(pedido.id)}>Marcar como listo</button>
+            <button
+              onClick={() => marcarListo(pedido.id)}
+              className="mt-3 border border-amber-400 text-amber-400 px-4 py-1 text-sm hover:bg-amber-400 hover:text-black transition-colors">
+              Marcar como listo
+            </button>
           )}
         </div>
       ))}
     </div>
-  );
+  </div>
+);
 }
 
 export default Cocina;

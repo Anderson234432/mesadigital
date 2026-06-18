@@ -53,28 +53,66 @@ export default function Admin() {
   };
 
   return (
-    <div style={{ padding: 20 }}>
-      <h2>Panel de Admin</h2>
+  <div className="min-h-screen bg-neutral-950 text-white font-serif">
+    {/* Header */}
+    <div className="bg-neutral-900 border-b border-neutral-800 px-6 py-4">
+      <p className="text-amber-400 text-xs tracking-widest uppercase">Panel de</p>
+      <h1 className="text-2xl font-bold">Administración</h1>
+    </div>
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 8, maxWidth: 400 }}>
-        <input name="nombre" placeholder="Nombre" value={form.nombre} onChange={handleChange} />
-        <input name="precio" placeholder="Precio" type="number" value={form.precio} onChange={handleChange} />
-        <input name="categoria" placeholder="Categoría" value={form.categoria} onChange={handleChange} />
-        <input name="descripcion" placeholder="Descripción" value={form.descripcion} onChange={handleChange} />
-        <input name="imagenUrl" placeholder="URL de imagen" value={form.imagenUrl} onChange={handleChange} />
-        <button onClick={guardar}>{editandoId ? "Actualizar" : "Agregar"}</button>
-        {editandoId && <button onClick={() => setEditandoId(null)}>Cancelar</button>}
+    <div className="max-w-lg mx-auto px-4 py-6">
+      {/* Formulario */}
+      <div className="border border-neutral-800 p-6 space-y-3 mb-8">
+        <h2 className="text-amber-400 text-xs tracking-widest uppercase mb-4">
+          {editandoId ? 'Editar plato' : 'Nuevo plato'}
+        </h2>
+        <input name="nombre" placeholder="Nombre" value={form.nombre} onChange={handleChange}
+          className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400" />
+        <input name="precio" placeholder="Precio" type="number" value={form.precio} onChange={handleChange}
+          className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400" />
+        <input name="categoria" placeholder="Categoría" value={form.categoria} onChange={handleChange}
+          className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400" />
+        <input name="descripcion" placeholder="Descripción" value={form.descripcion} onChange={handleChange}
+          className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400" />
+        <input name="imagenUrl" placeholder="URL de imagen" value={form.imagenUrl} onChange={handleChange}
+          className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400" />
+        <div className="flex gap-3 pt-2">
+          <button onClick={guardar}
+            className="bg-amber-400 text-black px-6 py-2 font-bold hover:bg-amber-300 transition-colors">
+            {editandoId ? 'Actualizar' : 'Agregar'}
+          </button>
+          {editandoId && (
+            <button onClick={() => setEditandoId(null)}
+              className="border border-neutral-600 text-neutral-400 px-6 py-2 hover:border-neutral-400 transition-colors">
+              Cancelar
+            </button>
+          )}
+        </div>
       </div>
 
-      <h3>Platos</h3>
-      {platos.map((p) => (
-        <div key={p.id} style={{ borderBottom: "1px solid #ccc", padding: "8px 0" }}>
-          <strong>{p.nombre}</strong> — RD${p.precio} ({p.categoria})
-          <br />
-          <button onClick={() => editar(p)}>Editar</button>{" "}
-          <button onClick={() => eliminar(p.id)}>Eliminar</button>
-        </div>
-      ))}
+      {/* Lista de platos */}
+      <h2 className="text-amber-400 text-xs tracking-widest uppercase mb-4">Platos</h2>
+      <div className="space-y-3">
+        {platos.map((p) => (
+          <div key={p.id} className="flex justify-between items-center border-b border-neutral-800 pb-3">
+            <div>
+              <p className="font-semibold">{p.nombre}</p>
+              <p className="text-neutral-400 text-sm">{p.categoria} — RD${p.precio}</p>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => editar(p)}
+                className="text-xs border border-neutral-600 text-neutral-400 px-3 py-1 hover:border-amber-400 hover:text-amber-400 transition-colors">
+                Editar
+              </button>
+              <button onClick={() => eliminar(p.id)}
+                className="text-xs border border-neutral-600 text-neutral-400 px-3 py-1 hover:border-red-400 hover:text-red-400 transition-colors">
+                Eliminar
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
-  );
+  </div>
+);
 }
