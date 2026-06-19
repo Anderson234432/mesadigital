@@ -99,9 +99,9 @@ function Menu() {
               <div key={plato.id} className="border-b border-neutral-800 pb-4">
                 {plato.imagenUrl && (
                   <img src={plato.imagenUrl} alt={plato.nombre}
-  className="w-full object-contain mb-3" />
+                    className="w-full object-contain mb-3" />
                 )}
-                <div className="w-full object-contain mb-3">
+                <div className="flex justify-between items-center">
                   <div>
                     <p className="text-lg font-semibold">{plato.nombre}</p>
                     <p className="text-neutral-400 text-sm">{plato.descripcion}</p>
