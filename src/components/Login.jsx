@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { signInWithEmailAndPassword } from 'firebase/auth';
+import { signInWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
 import { auth } from '../firebase';
 
 function Login() {
@@ -14,6 +14,16 @@ function Login() {
     } catch (err) {
       setError('Correo o contraseña incorrectos');
     }
+  }
+
+  async function recuperarPassword() {
+    if (!email) {
+      setError('Escribe tu correo primero');
+      return;
+    }
+    await sendPasswordResetEmail(auth, email);
+    setError('');
+    alert('Correo de recuperación enviado');
   }
 
   return (
@@ -40,6 +50,10 @@ function Login() {
           <button type="submit"
             className="w-full bg-amber-400 text-black py-2 font-bold hover:bg-amber-300 transition-colors">
             Entrar
+          </button>
+          <button type="button" onClick={recuperarPassword}
+            className="w-full text-neutral-500 text-sm hover:text-amber-400 transition-colors mt-2">
+            ¿Olvidaste tu contraseña?
           </button>
         </form>
       </div>
