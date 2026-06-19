@@ -9,6 +9,7 @@ function Menu() {
   const [carrito, setCarrito] = useState([]);
   const [restaurante, setRestaurante] = useState(null);
   const [bienvenida, setBienvenida] = useState(true);
+  const [categoriaActiva, setCategoriaActiva] = useState(null);
 
   useEffect(() => {
     const cargarRestaurante = async () => {
@@ -49,6 +50,8 @@ function Menu() {
     alert(`Pedido enviado desde Mesa ${numeroMesa}`);
   }
 
+  const categorias = [...new Set(platos.map((p) => p.categoria))];
+
   if (bienvenida) {
     return (
       <div className="min-h-screen bg-neutral-950 text-white font-serif flex flex-col items-center justify-center gap-4">
@@ -61,6 +64,7 @@ function Menu() {
 
   return (
     <div className="min-h-screen bg-neutral-950 text-white font-serif">
+      {/* Header */}
       <div className="relative h-48 flex items-end justify-center pb-6"
         style={{ background: 'linear-gradient(to bottom, #1a0a00, #0a0a0a)' }}>
         <div className="text-center">
@@ -69,29 +73,52 @@ function Menu() {
         </div>
       </div>
 
-      <div className="max-w-lg mx-auto px-4 py-6 space-y-4">
-        {platos.map((plato) => (
-          <div key={plato.id} className="border-b border-neutral-800 pb-4">
-            {plato.imagenUrl && (
-              <img src={plato.imagenUrl} alt={plato.nombre}
-                className="w-full h-40 object-cover mb-3" />
-            )}
-            <div className="flex justify-between items-center">
-              <div>
-                <p className="text-lg font-semibold">{plato.nombre}</p>
-                <p className="text-neutral-400 text-sm">{plato.descripcion}</p>
-                <p className="text-amber-400 mt-1">RD${plato.precio}</p>
-              </div>
-              <button
-                onClick={() => agregarAlCarrito(plato)}
-                className="ml-4 border border-amber-400 text-amber-400 px-3 py-1 text-sm hover:bg-amber-400 hover:text-black transition-colors">
-                + Agregar
-              </button>
-            </div>
+      {/* Categorías o platos */}
+      {!categoriaActiva ? (
+        <div className="max-w-lg mx-auto px-4 py-8 space-y-3">
+          {categorias.map((cat) => (
+            <button key={cat} onClick={() => setCategoriaActiva(cat)}
+              className="w-full border border-neutral-700 py-4 text-left px-6 text-lg font-semibold hover:border-amber-400 hover:text-amber-400 transition-colors capitalize">
+              {cat}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className="max-w-lg mx-auto px-4 py-6">
+          <div className="flex items-center gap-3 mb-6">
+            <button onClick={() => setCategoriaActiva(null)}
+              className="text-amber-400 text-sm hover:underline">
+              ← Volver
+            </button>
+            <h2 className="text-amber-400 text-xs tracking-widest uppercase">
+              Menú de {categoriaActiva}
+            </h2>
           </div>
-        ))}
-      </div>
+          <div className="space-y-4">
+            {platos.filter((p) => p.categoria === categoriaActiva).map((plato) => (
+              <div key={plato.id} className="border-b border-neutral-800 pb-4">
+                {plato.imagenUrl && (
+                  <img src={plato.imagenUrl} alt={plato.nombre}
+  className="w-full object-contain mb-3" />
+                )}
+                <div className="w-full object-contain mb-3">
+                  <div>
+                    <p className="text-lg font-semibold">{plato.nombre}</p>
+                    <p className="text-neutral-400 text-sm">{plato.descripcion}</p>
+                    <p className="text-amber-400 mt-1">RD${plato.precio}</p>
+                  </div>
+                  <button onClick={() => agregarAlCarrito(plato)}
+                    className="ml-4 border border-amber-400 text-amber-400 px-3 py-1 text-sm hover:bg-amber-400 hover:text-black transition-colors">
+                    + Agregar
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
+      {/* Carrito */}
       {carrito.length > 0 && (
         <div className="fixed bottom-0 left-0 right-0 bg-neutral-900 border-t border-neutral-800 p-4">
           <div className="max-w-lg mx-auto">
