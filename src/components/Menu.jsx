@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { collection, onSnapshot, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, serverTimestamp, getDoc, doc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useParams } from 'react-router-dom';
 
@@ -7,7 +7,7 @@ function Menu() {
   const { restauranteId, numeroMesa } = useParams();
   const [platos, setPlatos] = useState([]);
   const [carrito, setCarrito] = useState([]);
-
+  const [restaurante, setRestaurante] = useState(null);
   useEffect(() => {
     const unsubscribe = onSnapshot(collection(db, "restaurantes", restauranteId, "platos"), (snapshot) => {
       const datos = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
@@ -16,6 +16,21 @@ function Menu() {
 
     return () => unsubscribe();
   }, []);
+
+  useEffect(() => {
+  const cargarRestaurante = async () => {
+    const restauranteDoc = await getDoc(doc(db, 'restaurantes', restauranteId));
+    if (restauranteDoc.exists()) setRestaurante(restauranteDoc.data());
+  };
+  cargarRestaurante();
+
+  const unsubscribe = onSnapshot(collection(db, "restaurantes", restauranteId, "platos"), (snapshot) => {
+    const datos = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+    setPlatos(datos);
+  });
+
+  return () => unsubscribe();
+}, []);
 
   function agregarAlCarrito(plato) {
     setCarrito([...carrito, plato]);
@@ -45,7 +60,7 @@ function Menu() {
       style={{ background: 'linear-gradient(to bottom, #1a0a00, #0a0a0a)' }}>
       <div className="text-center">
         <p className="text-amber-400 text-sm tracking-widest uppercase">Bienvenido</p>
-        <h1 className="text-3xl font-bold tracking-wide">Mesa {numeroMesa}</h1>
+        <h1 className="text-3xl font-bold tracking-wide">{restaurante?.nombre || 'Menú'}</h1>
       </div>
     </div>
 
