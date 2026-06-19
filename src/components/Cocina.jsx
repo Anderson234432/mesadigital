@@ -2,8 +2,13 @@ import { useState, useEffect } from 'react';
 import { collection, onSnapshot, updateDoc, doc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useParams } from 'react-router-dom';
+import { signOut } from 'firebase/auth';
+import { auth } from '../firebase';
 
 function Cocina() {
+  async function cerrarSesion() {
+  await signOut(auth);
+}
   const { restauranteId } = useParams();
   const [pedidos, setPedidos] = useState([]);
 
@@ -22,10 +27,10 @@ function Cocina() {
   return (
   <div className="min-h-screen bg-neutral-950 text-white font-serif">
     {/* Header */}
-    <div className="bg-neutral-900 border-b border-neutral-800 px-6 py-4">
-      <p className="text-amber-400 text-xs tracking-widest uppercase">Panel de</p>
-      <h1 className="text-2xl font-bold">Cocina</h1>
-    </div>
+    <button onClick={cerrarSesion}
+  className="text-xs border border-neutral-600 text-neutral-400 px-3 py-1 hover:border-red-400 hover:text-red-400 transition-colors">
+  Cerrar sesión
+</button>
 
     {/* Pedidos */}
     <div className="max-w-2xl mx-auto px-4 py-6 space-y-4">

@@ -11,8 +11,13 @@ import {
 import { useParams } from 'react-router-dom'; 
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { storage } from "../firebase";
+import { signOut } from 'firebase/auth';
+import { auth } from '../firebase';
 
 export default function Admin() {
+  async function cerrarSesion() {
+  await signOut(auth);
+}
   const { restauranteId } = useParams();
   const [platos, setPlatos] = useState([]);
   const [form, setForm] = useState({
@@ -73,10 +78,16 @@ export default function Admin() {
   return (
   <div className="min-h-screen bg-neutral-950 text-white font-serif">
     {/* Header */}
-    <div className="bg-neutral-900 border-b border-neutral-800 px-6 py-4">
-      <p className="text-amber-400 text-xs tracking-widest uppercase">Panel de</p>
-      <h1 className="text-2xl font-bold">Administración</h1>
-    </div>
+    <div className="bg-neutral-900 border-b border-neutral-800 px-6 py-4 flex justify-between items-center">
+  <div>
+    <p className="text-amber-400 text-xs tracking-widest uppercase">Panel de</p>
+    <h1 className="text-2xl font-bold">Administración</h1>
+  </div>
+  <button onClick={cerrarSesion}
+    className="text-xs border border-neutral-600 text-neutral-400 px-3 py-1 hover:border-red-400 hover:text-red-400 transition-colors">
+    Cerrar sesión
+  </button>
+</div>
 
     <div className="max-w-lg mx-auto px-4 py-6">
       {/* Formulario */}

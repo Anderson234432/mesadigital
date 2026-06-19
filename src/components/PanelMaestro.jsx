@@ -2,8 +2,13 @@ import { useState, useEffect } from 'react';
 import { collection, onSnapshot, addDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { QRCodeSVG } from 'qrcode.react';
+import { signOut } from 'firebase/auth';
+import { auth } from '../firebase';
 
 function PanelMaestro() {
+  async function cerrarSesion() {
+  await signOut(auth);
+}
   const [restaurantes, setRestaurantes] = useState([]);
   const [nombre, setNombre] = useState('');
   const [mesasPor, setMesasPor] = useState({});
@@ -25,10 +30,16 @@ function PanelMaestro() {
 return (
   <div className="min-h-screen bg-neutral-950 text-white font-serif">
     {/* Header */}
-    <div className="bg-neutral-900 border-b border-neutral-800 px-6 py-4">
-      <p className="text-amber-400 text-xs tracking-widest uppercase">MesaDigital</p>
-      <h1 className="text-2xl font-bold">Panel Maestro</h1>
-    </div>
+    <div className="bg-neutral-900 border-b border-neutral-800 px-6 py-4 flex justify-between items-center">
+  <div>
+    <p className="text-amber-400 text-xs tracking-widest uppercase">Panel de</p>
+    <h1 className="text-2xl font-bold">Administración</h1>
+  </div>
+  <button onClick={cerrarSesion}
+    className="text-xs border border-neutral-600 text-neutral-400 px-3 py-1 hover:border-red-400 hover:text-red-400 transition-colors">
+    Cerrar sesión
+  </button>
+</div>
 
     <div className="max-w-lg mx-auto px-4 py-6">
       {/* Formulario */}
