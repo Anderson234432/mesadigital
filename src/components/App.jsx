@@ -25,7 +25,7 @@ function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/restaurante/:restauranteId/mesa/:numeroMesa" element={<Menu />} />
+        <Route path="/restaurante/:restauranteId/menu/:numeroMesa" element={<Menu />} />
         <Route path="/restaurante/:restauranteId/admin" element={usuario ? <Admin /> : <Login />} />
         <Route path="/restaurante/:restauranteId/cocina" element={usuario ? <Cocina /> : <Login />} />
         <Route path="/maestro" element={usuario ? <PanelMaestro /> : <Login />} />
@@ -33,5 +33,4 @@ function App() {
     </BrowserRouter>
   );
 }
-
 export default App;

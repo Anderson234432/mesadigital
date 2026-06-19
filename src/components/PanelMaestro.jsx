@@ -76,7 +76,7 @@ return (
               {Array.from({ length: mesasPor[r.id] || 0 }, (_, i) => i + 1).map((mesa) => (
                 <div key={mesa} className="flex flex-col items-center gap-2">
                   <QRCodeSVG
-                    value={`https://mesadigital-pi.vercel.app/restaurante/${r.id}/mesa/${mesa}`}
+                    value={`https://mesadigital-pi.vercel.app/restaurante/${r.id}/menu/${mesa}`}
                     size={100}
                     bgColor="#ffffff"
                     fgColor="#000000"
