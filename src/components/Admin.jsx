@@ -9,6 +9,8 @@ import {
   onSnapshot,
 } from "firebase/firestore";
 import { useParams } from 'react-router-dom'; 
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { storage } from "../firebase";
 
 export default function Admin() {
   const { restauranteId } = useParams();
@@ -21,7 +23,8 @@ export default function Admin() {
     imagenUrl: "",
   });
   const [editandoId, setEditandoId] = useState(null);
-
+  const [imagen, setImagen] = useState(null);
+  const [fileKey, setFileKey] = useState(0);
   useEffect(() => {
     const unsub = onSnapshot(collection(db, "restaurantes", restauranteId, "platos"), (snap) => {
       setPlatos(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
@@ -32,16 +35,31 @@ export default function Admin() {
   const handleChange = (e) =>
     setForm({ ...form, [e.target.name]: e.target.value });
 
+  async function subirImagen() {
+  if (!imagen) return null;
+  const storageRef = ref(storage, `platos/${Date.now()}_${imagen.name}`);
+  await uploadBytes(storageRef, imagen);
+  const url = await getDownloadURL(storageRef);
+  return url;
+}
+
   const guardar = async () => {
-    const datos = { ...form, precio: Number(form.precio) };
-    if (editandoId) {
-      await updateDoc(doc(db, "restaurantes", restauranteId, "platos", editandoId), datos);
-      setEditandoId(null);
-    } else {
-      await addDoc(collection(db, "restaurantes", restauranteId, "platos"), datos);
-    }
-    setForm({ nombre: "", precio: "", categoria: "", descripcion: "", imagenUrl: "" });
+  const urlImagen = await subirImagen();
+  const datos = {
+    ...form,
+    precio: Number(form.precio),
+    imagenUrl: urlImagen || form.imagenUrl,
   };
+  if (editandoId) {
+    await updateDoc(doc(db, "restaurantes", restauranteId, "platos", editandoId), datos);
+    setEditandoId(null);
+  } else {
+    await addDoc(collection(db, "restaurantes", restauranteId, "platos"), datos);
+  }
+  setForm({ nombre: "", precio: "", categoria: "", descripcion: "", imagenUrl: "" });
+  setImagen(null);
+  setFileKey(k => k + 1);
+};
 
   const editar = (plato) => {
     setForm(plato);
@@ -74,8 +92,15 @@ export default function Admin() {
           className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400" />
         <input name="descripcion" placeholder="Descripción" value={form.descripcion} onChange={handleChange}
           className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400" />
-        <input name="imagenUrl" placeholder="URL de imagen" value={form.imagenUrl} onChange={handleChange}
-          className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400" />
+        <input
+        key={fileKey}
+  type="file"
+  accept="image/*"
+  onChange={(e) => setImagen(e.target.files[0])}
+  className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-neutral-400 focus:outline-none focus:border-amber-400"
+/>
+<input name="imagenUrl" placeholder="O pega una URL de imagen" value={form.imagenUrl} onChange={handleChange}
+  className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400" />
         <div className="flex gap-3 pt-2">
           <button onClick={guardar}
             className="bg-amber-400 text-black px-6 py-2 font-bold hover:bg-amber-300 transition-colors">

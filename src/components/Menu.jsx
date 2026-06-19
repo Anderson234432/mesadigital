@@ -55,7 +55,10 @@ function Menu() {
         <div key={plato.id}
           className="flex justify-between items-center border-b border-neutral-800 pb-4">
           <div>
-            <p className="text-lg font-semibold">{plato.nombre}</p>
+            <p className="text-lg font-semibold">{plato.imagenUrl && (
+  <img src={plato.imagenUrl} alt={plato.nombre}
+    className="w-full h-40 object-cover mb-3" />
+)}{plato.nombre}</p>
             <p className="text-neutral-400 text-sm">{plato.descripcion}</p>
             <p className="text-amber-400 mt-1">RD${plato.precio}</p>
           </div>
