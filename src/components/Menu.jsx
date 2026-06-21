@@ -7,37 +7,41 @@ function Menu() {
   const { restauranteId, numeroMesa } = useParams();
   const [platos, setPlatos] = useState([]);
   const [carrito, setCarrito] = useState(() => {
-  const guardado = sessionStorage.getItem(`carrito_${restauranteId}`);
-  return guardado ? JSON.parse(guardado) : [];
-});
+    const guardado = sessionStorage.getItem(`carrito_${restauranteId}`);
+    return guardado ? JSON.parse(guardado) : [];
+  });
   const [restaurante, setRestaurante] = useState(null);
   const [bienvenida, setBienvenida] = useState(true);
   const [categoriaActiva, setCategoriaActiva] = useState(null);
-useEffect(() => {
-  const cargarRestaurante = async () => {
-    const restauranteDoc = await getDoc(doc(db, 'restaurantes', restauranteId));
-    if (restauranteDoc.exists()) setRestaurante(restauranteDoc.data());
-  };
-  cargarRestaurante();
-useEffect(() => {
-  sessionStorage.setItem(`carrito_${restauranteId}`, JSON.stringify(carrito));
-}, [carrito, restauranteId]);
-  const unsubscribe = onSnapshot(collection(db, 'restaurantes', restauranteId, 'platos'), (snapshot) => {
-    const datos = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
-    setPlatos(datos);
-  });
+  const [pedidoEnviado, setPedidoEnviado] = useState(false);
 
-  return () => unsubscribe();
-}, [restauranteId]);
+  useEffect(() => {
+    const cargarRestaurante = async () => {
+      const restauranteDoc = await getDoc(doc(db, 'restaurantes', restauranteId));
+      if (restauranteDoc.exists()) setRestaurante(restauranteDoc.data());
+    };
+    cargarRestaurante();
 
-useEffect(() => {
-  const timer = setTimeout(() => setBienvenida(false), 3000);
-  return () => clearTimeout(timer);
-}, []);
+    const unsubscribe = onSnapshot(collection(db, 'restaurantes', restauranteId, 'platos'), (snapshot) => {
+      const datos = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+      setPlatos(datos);
+    });
 
-function agregarAlCarrito(plato) {
-  setCarrito(prev => [...prev, plato]);
-}
+    return () => unsubscribe();
+  }, [restauranteId]);
+
+  useEffect(() => {
+    sessionStorage.setItem(`carrito_${restauranteId}`, JSON.stringify(carrito));
+  }, [carrito, restauranteId]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setBienvenida(false), 3000);
+    return () => clearTimeout(timer);
+  }, []);
+
+  function agregarAlCarrito(plato) {
+    setCarrito(prev => [...prev, plato]);
+  }
 
   const total = carrito.reduce((suma, item) => suma + item.precio, 0);
 
@@ -52,7 +56,8 @@ function agregarAlCarrito(plato) {
     });
     setCarrito([]);
     sessionStorage.removeItem(`carrito_${restauranteId}`);
-    alert(`Pedido enviado desde Mesa ${numeroMesa}`);
+    setPedidoEnviado(true);
+    setTimeout(() => setPedidoEnviado(false), 3000);
   }
 
   const categorias = [...new Set(platos.map((p) => p.categoria))];
@@ -69,7 +74,6 @@ function agregarAlCarrito(plato) {
 
   return (
     <div className="min-h-screen bg-neutral-950 text-white font-serif">
-      {/* Header */}
       <div className="relative h-48 flex items-end justify-center pb-6"
         style={{ background: 'linear-gradient(to bottom, #1a0a00, #0a0a0a)' }}>
         <div className="text-center">
@@ -78,7 +82,6 @@ function agregarAlCarrito(plato) {
         </div>
       </div>
 
-      {/* Categorías o platos */}
       {!categoriaActiva ? (
         <div className="max-w-lg mx-auto px-4 py-8 space-y-3">
           {categorias.map((cat) => (
@@ -123,7 +126,14 @@ function agregarAlCarrito(plato) {
         </div>
       )}
 
-      {/* Carrito */}
+      {pedidoEnviado && (
+        <div className="fixed top-4 left-0 right-0 flex justify-center z-50">
+          <div className="bg-amber-400 text-black px-6 py-3 font-bold text-sm">
+            ✓ Pedido enviado — la cocina lo está preparando
+          </div>
+        </div>
+      )}
+
       {carrito.length > 0 && (
         <div className="fixed bottom-0 left-0 right-0 bg-neutral-900 border-t border-neutral-800 p-4">
           <div className="max-w-lg mx-auto">
