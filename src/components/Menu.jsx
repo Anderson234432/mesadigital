@@ -6,34 +6,38 @@ import { useParams } from 'react-router-dom';
 function Menu() {
   const { restauranteId, numeroMesa } = useParams();
   const [platos, setPlatos] = useState([]);
-  const [carrito, setCarrito] = useState([]);
+  const [carrito, setCarrito] = useState(() => {
+  const guardado = sessionStorage.getItem(`carrito_${restauranteId}`);
+  return guardado ? JSON.parse(guardado) : [];
+});
   const [restaurante, setRestaurante] = useState(null);
   const [bienvenida, setBienvenida] = useState(true);
   const [categoriaActiva, setCategoriaActiva] = useState(null);
+useEffect(() => {
+  const cargarRestaurante = async () => {
+    const restauranteDoc = await getDoc(doc(db, 'restaurantes', restauranteId));
+    if (restauranteDoc.exists()) setRestaurante(restauranteDoc.data());
+  };
+  cargarRestaurante();
+useEffect(() => {
+  sessionStorage.setItem(`carrito_${restauranteId}`, JSON.stringify(carrito));
+}, [carrito, restauranteId]);
+  const unsubscribe = onSnapshot(collection(db, 'restaurantes', restauranteId, 'platos'), (snapshot) => {
+    const datos = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+    setPlatos(datos);
+  });
 
-  useEffect(() => {
-    const cargarRestaurante = async () => {
-      const restauranteDoc = await getDoc(doc(db, 'restaurantes', restauranteId));
-      if (restauranteDoc.exists()) setRestaurante(restauranteDoc.data());
-    };
-    cargarRestaurante();
+  return () => unsubscribe();
+}, [restauranteId]);
 
-    const unsubscribe = onSnapshot(collection(db, 'restaurantes', restauranteId, 'platos'), (snapshot) => {
-      const datos = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
-      setPlatos(datos);
-    });
+useEffect(() => {
+  const timer = setTimeout(() => setBienvenida(false), 3000);
+  return () => clearTimeout(timer);
+}, []);
 
-    return () => unsubscribe();
-  }, []);
-
-  useEffect(() => {
-    const timer = setTimeout(() => setBienvenida(false), 3000);
-    return () => clearTimeout(timer);
-  }, []);
-
-  function agregarAlCarrito(plato) {
-    setCarrito([...carrito, plato]);
-  }
+function agregarAlCarrito(plato) {
+  setCarrito(prev => [...prev, plato]);
+}
 
   const total = carrito.reduce((suma, item) => suma + item.precio, 0);
 
@@ -47,6 +51,7 @@ function Menu() {
       creadoEn: serverTimestamp(),
     });
     setCarrito([]);
+    sessionStorage.removeItem(`carrito_${restauranteId}`);
     alert(`Pedido enviado desde Mesa ${numeroMesa}`);
   }
 

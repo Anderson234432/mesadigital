@@ -20,7 +20,7 @@ function Cocina() {
 setPedidos(datos);
     });
     return () => unsubscribe();
-  }, []);
+  },  [restauranteId]);
 
   async function marcarListo(id) {
     await updateDoc(doc(db, "restaurantes", restauranteId, "pedidos", id), { estado: 'listo' });
