@@ -15,6 +15,7 @@ function Menu() {
   const [categoriaActiva, setCategoriaActiva] = useState(null);
   const [pedidoEnviado, setPedidoEnviado] = useState(false);
 const [carritoAbierto, setCarritoAbierto] = useState(false);
+const [nota, setNota] = useState('');
   useEffect(() => {
     const cargarRestaurante = async () => {
       const restauranteDoc = await getDoc(doc(db, 'restaurantes', restauranteId));
@@ -51,12 +52,14 @@ const [carritoAbierto, setCarritoAbierto] = useState(false);
       mesa: numeroMesa,
       items: carrito.map((p) => ({ nombre: p.nombre, precio: p.precio })),
       total: total,
+      nota: nota,
       estado: 'pendiente',
       creadoEn: serverTimestamp(),
     });
     setCarrito([]);
     sessionStorage.removeItem(`carrito_${restauranteId}`);
     setPedidoEnviado(true);
+    setNota('');
     setTimeout(() => setPedidoEnviado(false), 3000);
   }
 
@@ -186,6 +189,13 @@ if (bienvenida) {
                   </div>
                 ))}
               </div>
+              <textarea
+  placeholder="Nota para la cocina (opcional)..."
+  value={nota}
+  onChange={(e) => setNota(e.target.value)}
+  className="w-full bg-neutral-800 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-sm resize-none mt-2"
+  rows={2}
+/>
               <div className="flex justify-between items-center border-t border-neutral-700 pt-3">
                 <button onClick={() => {
                   setCarrito([]);

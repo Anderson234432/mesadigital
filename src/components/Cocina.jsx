@@ -38,10 +38,21 @@ function Cocina() {
   // Agrupa pedidos por mesa
   const mesasAgrupadas = pedidos.reduce((acc, pedido) => {
     const mesa = pedido.mesa;
-    if (!acc[mesa]) acc[mesa] = { mesa, items: [], total: 0, ids: [], estado: pedido.estado, hora: pedido.creadoEn?.toMillis(), ultimoPedido: null, primerPedido: pedido.creadoEn?.toMillis() };
-    pedido.items.forEach(item => acc[mesa].items.push(item));
+    if (!acc[mesa]) acc[mesa] = {
+      mesa,
+      rondas: [],
+      total: 0,
+      ids: [],
+      estado: pedido.estado,
+      hora: pedido.creadoEn?.toMillis(),
+      ultimoPedido: null,
+      primerPedido: pedido.creadoEn?.toMillis()
+    };
+
+    acc[mesa].rondas.push({ items: pedido.items, nota: pedido.nota || '' });
     acc[mesa].total += pedido.total;
     acc[mesa].ids.push(pedido.id);
+
     if (!acc[mesa].ultimoPedido || pedido.creadoEn?.toMillis() > acc[mesa].ultimoPedido) {
       acc[mesa].ultimoPedido = pedido.creadoEn?.toMillis();
     }
@@ -75,34 +86,42 @@ function Cocina() {
           <div key={mesa.mesa}
             className={`border p-4 ${mesa.estado === 'pendiente' ? 'border-amber-400' : 'border-neutral-700 opacity-50'}`}>
 
-            {/* Cabecera de la mesa */}
-            <div className="flex justify-between items-center mb-2">
+            {/* Cabecera */}
+            <div className="flex justify-between items-center mb-3">
               <h2 className="text-lg font-bold">Mesa {mesa.mesa}</h2>
               <span className={`text-xs tracking-widest uppercase px-2 py-1 ${mesa.estado === 'pendiente' ? 'bg-amber-400 text-black' : 'bg-neutral-700 text-neutral-400'}`}>
                 {mesa.estado}
               </span>
             </div>
 
-            {/* Alerta de nuevo pedido */}
-            {mesa.ids.length > 1 && mesa.estado === 'pendiente' && 
-  mesa.ultimoPedido && mesa.primerPedido &&
-  (mesa.ultimoPedido - mesa.primerPedido) > 15 * 60 * 1000 && (
-  <p className="text-xs text-amber-400 mb-2 animate-pulse">
-    ⚡ Nueva orden de esta mesa
-  </p>
-)}
-            {/* Items agrupados */}
-            <ul className="text-neutral-300 text-sm space-y-1 mb-3">
-              {Object.values(
-                mesa.items.reduce((acc, item) => {
-                  if (!acc[item.nombre]) acc[item.nombre] = { ...item, cantidad: 0 };
-                  acc[item.nombre].cantidad += 1;
-                  return acc;
-                }, {})
-              ).map((item, i) => (
-                <li key={i}>{item.nombre} x{item.cantidad} — RD${item.precio * item.cantidad}</li>
-              ))}
-            </ul>
+            {/* Alerta nueva ronda */}
+            {mesa.ids.length > 1 && mesa.estado === 'pendiente' &&
+              mesa.ultimoPedido && mesa.primerPedido &&
+              (mesa.ultimoPedido - mesa.primerPedido) > 15 * 60 * 1000 && (
+              <p className="text-xs text-amber-400 mb-2 animate-pulse">
+                ⚡ Nueva orden de esta mesa
+              </p>
+            )}
+
+            {/* Rondas de pedidos */}
+            {mesa.rondas.map((ronda, i) => (
+              <div key={i} className="mb-3 border-b border-neutral-800 pb-2">
+                <ul className="text-neutral-300 text-sm space-y-1">
+                  {Object.values(
+                    ronda.items.reduce((acc, item) => {
+                      if (!acc[item.nombre]) acc[item.nombre] = { ...item, cantidad: 0 };
+                      acc[item.nombre].cantidad += 1;
+                      return acc;
+                    }, {})
+                  ).map((item, j) => (
+                    <li key={j}>{item.nombre} x{item.cantidad} — RD${item.precio * item.cantidad}</li>
+                  ))}
+                </ul>
+                {ronda.nota && ronda.nota.trim() !== '' && (
+                  <p className="text-neutral-400 text-xs italic mt-1">📝 {ronda.nota}</p>
+                )}
+              </div>
+            ))}
 
             {/* Total y hora */}
             <p className="text-amber-400 font-bold">Total: RD${mesa.total}</p>
@@ -123,7 +142,6 @@ function Cocina() {
                 Archivar mesa
               </button>
             )}
-
           </div>
         ))}
       </div>
