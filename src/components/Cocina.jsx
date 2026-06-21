@@ -14,8 +14,10 @@ function Cocina() {
 
   useEffect(() => {
     const unsubscribe = onSnapshot(collection(db, "restaurantes", restauranteId, "pedidos"), (snapshot) => {
-      const datos = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
-      setPedidos(datos);
+    const datos = snapshot.docs
+  .map((d) => ({ id: d.id, ...d.data() }))
+  .filter((p) => p.estado !== 'archivado');
+setPedidos(datos);
     });
     return () => unsubscribe();
   }, []);
@@ -23,7 +25,9 @@ function Cocina() {
   async function marcarListo(id) {
     await updateDoc(doc(db, "restaurantes", restauranteId, "pedidos", id), { estado: 'listo' });
   }
-
+async function archivar(id) {
+  await updateDoc(doc(db, 'restaurantes', restauranteId, 'pedidos', id), { estado: 'archivado' });
+}
   return (
   <div className="min-h-screen bg-neutral-950 text-white font-serif">
     {/* Header */}
@@ -53,12 +57,17 @@ function Cocina() {
           </ul>
           <p className="text-amber-400 font-bold">Total: RD${pedido.total}</p>
           {pedido.estado === 'pendiente' && (
-            <button
-              onClick={() => marcarListo(pedido.id)}
-              className="mt-3 border border-amber-400 text-amber-400 px-4 py-1 text-sm hover:bg-amber-400 hover:text-black transition-colors">
-              Marcar como listo
-            </button>
-          )}
+  <button onClick={() => marcarListo(pedido.id)}
+    className="mt-3 border border-amber-400 text-amber-400 px-4 py-1 text-sm hover:bg-amber-400 hover:text-black transition-colors">
+    Marcar como listo
+  </button>
+)}
+{pedido.estado === 'listo' && (
+  <button onClick={() => archivar(pedido.id)}
+    className="mt-3 border border-neutral-600 text-neutral-400 px-4 py-1 text-sm hover:border-red-400 hover:text-red-400 transition-colors">
+    Archivar
+  </button>
+)}
         </div>
       ))}
     </div>
