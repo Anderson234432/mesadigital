@@ -14,7 +14,7 @@ function Menu() {
   const [bienvenida, setBienvenida] = useState(true);
   const [categoriaActiva, setCategoriaActiva] = useState(null);
   const [pedidoEnviado, setPedidoEnviado] = useState(false);
-
+const [carritoAbierto, setCarritoAbierto] = useState(false);
   useEffect(() => {
     const cargarRestaurante = async () => {
       const restauranteDoc = await getDoc(doc(db, 'restaurantes', restauranteId));
@@ -62,7 +62,18 @@ function Menu() {
 
   const categorias = [...new Set(platos.map((p) => p.categoria))];
 
-  if (bienvenida) {
+const carritoAgrupado = carrito.reduce((acc, item) => {
+  const existe = acc.find(i => i.id === item.id);
+  if (existe) {
+    existe.cantidad += 1;
+    existe.subtotal += item.precio;
+  } else {
+    acc.push({ ...item, cantidad: 1, subtotal: item.precio });
+  }
+  return acc;
+}, []);
+
+if (bienvenida) {
     return (
       <div className="min-h-screen bg-neutral-950 text-white font-serif flex flex-col items-center justify-center gap-4">
         <p className="text-amber-400 text-xs tracking-widest uppercase">Bienvenido a</p>
@@ -107,7 +118,7 @@ function Menu() {
               <div key={plato.id} className="border-b border-neutral-800 pb-4">
                 {plato.imagenUrl && (
                   <img src={plato.imagenUrl} alt={plato.nombre}
-                    className="w-full object-contain mb-3" />
+                    className="w-full object-contain mb-3 max-h-64" />
                 )}
                 <div className="flex justify-between items-center">
                   <div>
@@ -115,10 +126,33 @@ function Menu() {
                     <p className="text-neutral-400 text-sm">{plato.descripcion}</p>
                     <p className="text-amber-400 mt-1">RD${plato.precio}</p>
                   </div>
-                  <button onClick={() => agregarAlCarrito(plato)}
-                    className="ml-4 border border-amber-400 text-amber-400 px-3 py-1 text-sm hover:bg-amber-400 hover:text-black transition-colors">
-                    + Agregar
-                  </button>
+                  <div className="flex items-center gap-2 ml-4">
+  {carritoAgrupado.find(i => i.id === plato.id) ? (
+    <>
+      <button onClick={() => setCarrito(prev => {
+        const idx = [...prev].map(i => i.id).lastIndexOf(plato.id);
+        const nuevo = [...prev];
+        nuevo.splice(idx, 1);
+        return nuevo;
+      })}
+        className="border border-neutral-600 text-white w-7 h-7 flex items-center justify-center hover:border-red-400 hover:text-red-400 transition-colors">
+        −
+      </button>
+      <span className="text-white w-4 text-center">
+        {carritoAgrupado.find(i => i.id === plato.id)?.cantidad}
+      </span>
+      <button onClick={() => agregarAlCarrito(plato)}
+        className="border border-amber-400 text-amber-400 w-7 h-7 flex items-center justify-center hover:bg-amber-400 hover:text-black transition-colors">
+        +
+      </button>
+    </>
+  ) : (
+    <button onClick={() => agregarAlCarrito(plato)}
+      className="border border-amber-400 text-amber-400 px-3 py-1 text-sm hover:bg-amber-400 hover:text-black transition-colors">
+      + Agregar
+    </button>
+  )}
+</div>
                 </div>
               </div>
             ))}
@@ -135,17 +169,37 @@ function Menu() {
       )}
 
       {carrito.length > 0 && (
-        <div className="fixed bottom-0 left-0 right-0 bg-neutral-900 border-t border-neutral-800 p-4">
-          <div className="max-w-lg mx-auto">
-            <p className="text-sm text-neutral-400 mb-1">{carrito.length} ítem(s) en tu pedido</p>
-            <div className="flex justify-between items-center">
-              <p className="text-xl font-bold text-amber-400">RD${total}</p>
-              <button onClick={enviarPedido}
-                className="bg-amber-400 text-black px-6 py-2 font-bold hover:bg-amber-300 transition-colors">
-                Enviar pedido
-              </button>
+        <div className="fixed bottom-0 left-0 right-0 bg-neutral-900 border-t border-neutral-800">
+          <button onClick={() => setCarritoAbierto(!carritoAbierto)}
+            className="w-full flex justify-between items-center px-4 py-3">
+            <span className="text-sm text-neutral-400">{carrito.length} ítem(s)</span>
+            <span className="text-amber-400 font-bold">RD${total} {carritoAbierto ? '▼' : '▲'}</span>
+          </button>
+
+          {carritoAbierto && (
+            <div className="max-w-lg mx-auto px-4 pb-4">
+              <div className="space-y-1 mb-3 max-h-40 overflow-y-auto">
+                {carritoAgrupado.map((item) => (
+                  <div key={item.id} className="flex justify-between text-sm text-neutral-300">
+                    <span>{item.nombre} x{item.cantidad}</span>
+                    <span>RD${item.subtotal}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="flex justify-between items-center border-t border-neutral-700 pt-3">
+                <button onClick={() => {
+                  setCarrito([]);
+                  sessionStorage.removeItem(`carrito_${restauranteId}`);
+                }} className="text-xs text-neutral-500 hover:text-red-400 transition-colors">
+                  Cancelar
+                </button>
+                <button onClick={enviarPedido}
+                  className="bg-amber-400 text-black px-6 py-2 font-bold hover:bg-amber-300 transition-colors">
+                  Enviar pedido
+                </button>
+              </div>
             </div>
-          </div>
+          )}
         </div>
       )}
     </div>
