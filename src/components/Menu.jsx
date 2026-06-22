@@ -117,7 +117,7 @@ if (bienvenida) {
             </h2>
           </div>
           <div className="space-y-4">
-            {platos.filter((p) => p.categoria === categoriaActiva).map((plato) => (
+            {platos.filter((p) => p.categoria === categoriaActiva && p.disponible !== false).map((plato) => (
               <div key={plato.id} className="border-b border-neutral-800 pb-4">
                 {plato.imagenUrl && (
                   <img src={plato.imagenUrl} alt={plato.nombre}
@@ -189,13 +189,7 @@ if (bienvenida) {
                   </div>
                 ))}
               </div>
-              <textarea
-  placeholder="Nota para la cocina (opcional)..."
-  value={nota}
-  onChange={(e) => setNota(e.target.value)}
-  className="w-full bg-neutral-800 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-sm resize-none mt-2"
-  rows={2}
-/>
+              
               <div className="flex justify-between items-center border-t border-neutral-700 pt-3">
                 <button onClick={() => {
                   setCarrito([]);

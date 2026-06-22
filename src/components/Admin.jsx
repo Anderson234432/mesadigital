@@ -26,6 +26,7 @@ export default function Admin() {
     categoria: "",
     descripcion: "",
     imagenUrl: "",
+    disponible: true,
   });
   const [editandoId, setEditandoId] = useState(null);
   const [imagen, setImagen] = useState(null);
@@ -140,6 +141,10 @@ export default function Admin() {
                 className="text-xs border border-neutral-600 text-neutral-400 px-3 py-1 hover:border-amber-400 hover:text-amber-400 transition-colors">
                 Editar
               </button>
+              <button onClick={() => updateDoc(doc(db, "restaurantes", restauranteId, "platos", p.id), { disponible: !p.disponible })}
+  className={`text-xs border px-3 py-1 transition-colors ${p.disponible ? 'border-neutral-600 text-neutral-400 hover:border-red-400 hover:text-red-400' : 'border-amber-400 text-amber-400'}`}>
+  {p.disponible ? 'Desactivar' : 'Activar'}
+</button>
               <button onClick={() => eliminar(p.id)}
                 className="text-xs border border-neutral-600 text-neutral-400 px-3 py-1 hover:border-red-400 hover:text-red-400 transition-colors">
                 Eliminar
