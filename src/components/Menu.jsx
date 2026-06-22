@@ -13,13 +13,17 @@ function Menu() {
   const [restaurante, setRestaurante] = useState(null);
   const [bienvenida, setBienvenida] = useState(true);
   const [categoriaActiva, setCategoriaActiva] = useState(null);
-  const [pedidoEnviado, setPedidoEnviado] = useState(false);
+  const [pedidoEnviado, setPedidoEnviado] = useState('');
 const [carritoAbierto, setCarritoAbierto] = useState(false);
 const [nota, setNota] = useState('');
+const [tiemposRestaurante, setTiemposRestaurante] = useState({});
+const [mesasPendientes, setMesasPendientes] = useState(0);
   useEffect(() => {
     const cargarRestaurante = async () => {
       const restauranteDoc = await getDoc(doc(db, 'restaurantes', restauranteId));
       if (restauranteDoc.exists()) setRestaurante(restauranteDoc.data());
+      const t = restauranteDoc.data().tiempos || {};
+setTiemposRestaurante(t);
     };
     cargarRestaurante();
 
@@ -27,8 +31,10 @@ const [nota, setNota] = useState('');
       const datos = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
       setPlatos(datos);
     });
-
-    return () => unsubscribe();
+return () => {
+  unsubscribe();
+  unsubPedidos();
+};
   }, [restauranteId]);
 
   useEffect(() => {
@@ -45,26 +51,44 @@ const [nota, setNota] = useState('');
   }
 
   const total = carrito.reduce((suma, item) => suma + item.precio, 0);
+async function enviarPedido() {
+  if (carrito.length === 0) return;
 
-  async function enviarPedido() {
-    if (carrito.length === 0) return;
-    await addDoc(collection(db, 'restaurantes', restauranteId, 'pedidos'), {
-      mesa: numeroMesa,
-      items: carrito.map((p) => ({ nombre: p.nombre, precio: p.precio })),
-      total: total,
-      nota: nota,
-      estado: 'pendiente',
-      creadoEn: serverTimestamp(),
-    });
-    setCarrito([]);
-    sessionStorage.removeItem(`carrito_${restauranteId}`);
-    setPedidoEnviado(true);
-    setNota('');
-    setTimeout(() => setPedidoEnviado(false), 3000);
-  }
+  // Calcular tiempo ANTES de enviar
+  const tieneBebidas = carrito.some(p => p.categoria?.toLowerCase() === 'bebidas');
+  const tieneComida = carrito.some(p => p.categoria?.toLowerCase() !== 'bebidas');
+
+  const tiempoBebida = tiemposRestaurante.bebidas || 5;
+  const tiempoComida = tieneComida
+    ? Math.max(...carrito.filter(p => p.categoria?.toLowerCase() !== 'bebidas').map(p => p.tiempoMin || 15)) * (mesasPendientes + 1)
+    : null;
+
+  let mensaje = '';
+  if (tieneBebidas) mensaje += `🥤 Tu bebida tardará aprox ${tiempoBebida} min. `;
+  if (tieneComida) mensaje += `🍽️ Tu comida tardará aprox ${tiempoComida} min.`;
+
+  // Enviar pedido después
+  await addDoc(collection(db, 'restaurantes', restauranteId, 'pedidos'), {
+    mesa: numeroMesa,
+    items: carrito.map((p) => ({ nombre: p.nombre, precio: p.precio })),
+    total: total,
+    estado: 'pendiente',
+    nota: nota,
+    creadoEn: serverTimestamp(),
+  });
+
+  setCarrito([]);
+  sessionStorage.removeItem(`carrito_${restauranteId}`);
+  setPedidoEnviado(mensaje);
+  setTimeout(() => setPedidoEnviado(''), 5000);
+}
 
   const categorias = [...new Set(platos.map((p) => p.categoria))];
-
+const unsubPedidos = onSnapshot(collection(db, 'restaurantes', restauranteId, 'pedidos'), (snapshot) => {
+  const pendientes = snapshot.docs.filter(d => d.data().estado === 'pendiente');
+  const mesas = new Set(pendientes.map(d => d.data().mesa));
+  setMesasPendientes(mesas.size);
+});
 const carritoAgrupado = carrito.reduce((acc, item) => {
   const existe = acc.find(i => i.id === item.id);
   if (existe) {
@@ -165,9 +189,9 @@ if (bienvenida) {
 
       {pedidoEnviado && (
         <div className="fixed top-4 left-0 right-0 flex justify-center z-50">
-          <div className="bg-amber-400 text-black px-6 py-3 font-bold text-sm">
-            ✓ Pedido enviado — la cocina lo está preparando
-          </div>
+          <div className="bg-amber-400 text-black px-6 py-3 font-bold text-sm text-center">
+          {pedidoEnviado}
+        </div>
         </div>
       )}
 
