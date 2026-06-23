@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { collection, onSnapshot, addDoc, serverTimestamp, getDoc, doc } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, serverTimestamp, getDoc, doc, query, where } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useParams } from 'react-router-dom';
 
@@ -58,39 +58,47 @@ function Menu() {
       (err) => console.error('Error en platos:', err)
     );
 
-    const unsubPedidos = onSnapshot(
-      collection(db, 'restaurantes', restauranteId, 'pedidos'),
-      (snapshot) => {
-        const todos = snapshot.docs.map(d => d.data());
+    // 2. Solo pedidos de ESTA mesa — estado e historial
+const unsubMiMesa = onSnapshot(
+  query(
+    collection(db, 'restaurantes', restauranteId, 'pedidos'),
+    where('mesa', '==', numeroMesa),
+    where('estado', '!=', 'archivado')
+  ),
+  (snapshot) => {
+    const todos = snapshot.docs.map(d => d.data());
+    const conPedidos = todos.filter(p => p.tipo !== 'llamada');
 
-        const mesas = new Set(
-          todos.filter(p => p.estado === 'pendiente').map(p => p.mesa)
-        );
-        setMesasPendientes(mesas.size);
+    if (conPedidos.length === 0) {
+      setEstadoMesa(null);
+    } else if (conPedidos.some(p => p.estado === 'pendiente')) {
+      setEstadoMesa('pendiente');
+    } else {
+      setEstadoMesa('listo');
+    }
 
-        const deMiMesa = todos.filter(p =>
-          p.mesa === numeroMesa &&
-          p.estado !== 'archivado' &&
-          p.tipo !== 'llamada'
-        );
-        if (deMiMesa.length === 0) {
-          setEstadoMesa(null);
-        } else if (deMiMesa.some(p => p.estado === 'pendiente')) {
-          setEstadoMesa('pendiente');
-        } else {
-          setEstadoMesa('listo');
-        }
+    setPedidosMesa(conPedidos);
+  },
+  (err) => console.error('Error en pedidos de mesa:', err)
+);
 
-        setPedidosMesa(
-          todos.filter(p => p.mesa === numeroMesa && p.tipo !== 'llamada' && p.estado !== 'archivado')
-        );
-      },
-      (err) => console.error('Error en pedidos:', err)
-    );
+// 3. Solo conteo de mesas pendientes — para tiempo estimado
+const unsubConteo = onSnapshot(
+  query(
+    collection(db, 'restaurantes', restauranteId, 'pedidos'),
+    where('estado', '==', 'pendiente')
+  ),
+  (snapshot) => {
+    const mesas = new Set(snapshot.docs.map(d => d.data().mesa));
+    setMesasPendientes(mesas.size);
+  },
+  (err) => console.error('Error en conteo:', err)
+);
 
     return () => {
       unsubPlatos();
-      unsubPedidos();
+      unsubMiMesa();
+      unsubConteo();
     };
   }, [restauranteId, numeroMesa]);
 
