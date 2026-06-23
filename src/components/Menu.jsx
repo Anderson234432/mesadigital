@@ -5,7 +5,15 @@ import { useParams } from 'react-router-dom';
 
 function Menu() {
   const { restauranteId, numeroMesa } = useParams();
+
+  // ─── Estado ───────────────────────────────────────────────
+  const [restaurante, setRestaurante] = useState(null);
   const [platos, setPlatos] = useState([]);
+  const [tiemposRestaurante, setTiemposRestaurante] = useState({});
+  const [mesasPendientes, setMesasPendientes] = useState(0);
+  const [estadoMesa, setEstadoMesa] = useState(null);
+  const [pedidosMesa, setPedidosMesa] = useState([]);
+
   const [carrito, setCarrito] = useState(() => {
     try {
       const guardado = sessionStorage.getItem(`carrito_${restauranteId}`);
@@ -14,18 +22,18 @@ function Menu() {
       return [];
     }
   });
-  const [restaurante, setRestaurante] = useState(null);
-  const [bienvenida, setBienvenida] = useState(true);
-  const [categoriaActiva, setCategoriaActiva] = useState(null);
-  const [pedidoEnviado, setPedidoEnviado] = useState('');
   const [carritoAbierto, setCarritoAbierto] = useState(false);
   const [nota, setNota] = useState('');
-  const [tiemposRestaurante, setTiemposRestaurante] = useState({});
-  const [mesasPendientes, setMesasPendientes] = useState(0);
   const [enviando, setEnviando] = useState(false);
-  const [error, setError] = useState('');
-  const [estadoMesa, setEstadoMesa] = useState(null);
   const [llamandoMesero, setLlamandoMesero] = useState(false);
+
+  const [bienvenida, setBienvenida] = useState(true);
+  const [categoriaActiva, setCategoriaActiva] = useState(null);
+  const [historialAbierto, setHistorialAbierto] = useState(false);
+  const [pedidoEnviado, setPedidoEnviado] = useState('');
+  const [error, setError] = useState('');
+
+  // ─── Carga inicial ────────────────────────────────────────
   useEffect(() => {
     const cargarRestaurante = async () => {
       try {
@@ -46,12 +54,32 @@ function Menu() {
       (err) => console.error('Error en platos:', err)
     );
 
+    // Un solo listener para pedidos — maneja los 3 estados derivados
     const unsubPedidos = onSnapshot(
       collection(db, 'restaurantes', restauranteId, 'pedidos'),
       (snapshot) => {
-        const pendientes = snapshot.docs.filter(d => d.data().estado === 'pendiente');
-        const mesas = new Set(pendientes.map(d => d.data().mesa));
+        const todos = snapshot.docs.map(d => d.data());
+
+        // Mesas pendientes (para calcular tiempo estimado)
+        const mesas = new Set(
+          todos.filter(p => p.estado === 'pendiente').map(p => p.mesa)
+        );
         setMesasPendientes(mesas.size);
+
+        // Estado del pedido de esta mesa
+        const deMiMesa = todos.filter(p => p.mesa === numeroMesa && p.estado !== 'archivado');
+        if (deMiMesa.length === 0) {
+          setEstadoMesa(null);
+        } else if (deMiMesa.some(p => p.estado === 'pendiente')) {
+          setEstadoMesa('pendiente');
+        } else {
+          setEstadoMesa('listo');
+        }
+
+        // Historial de pedidos de esta mesa (sin llamadas al mesero)
+        setPedidosMesa(
+          todos.filter(p => p.mesa === numeroMesa && p.tipo !== 'llamada' && p.estado !== 'archivado')
+        );
       },
       (err) => console.error('Error en pedidos:', err)
     );
@@ -60,8 +88,9 @@ function Menu() {
       unsubPlatos();
       unsubPedidos();
     };
-  }, [restauranteId]);
+  }, [restauranteId, numeroMesa]);
 
+  // ─── Persistir carrito ────────────────────────────────────
   useEffect(() => {
     try {
       sessionStorage.setItem(`carrito_${restauranteId}`, JSON.stringify(carrito));
@@ -69,30 +98,14 @@ function Menu() {
       console.error('Error guardando carrito:', e);
     }
   }, [carrito, restauranteId]);
-useEffect(() => {
-  const unsubEstado = onSnapshot(
-    collection(db, 'restaurantes', restauranteId, 'pedidos'),
-    (snapshot) => {
-      const pedidosMesa = snapshot.docs
-        .map(d => d.data())
-        .filter(p => p.mesa === numeroMesa && p.estado !== 'archivado');
 
-      if (pedidosMesa.length === 0) {
-        setEstadoMesa(null);
-      } else if (pedidosMesa.some(p => p.estado === 'pendiente')) {
-        setEstadoMesa('pendiente');
-      } else {
-        setEstadoMesa('listo');
-      }
-    }
-  );
-  return () => unsubEstado();
-}, [restauranteId, numeroMesa]);
+  // ─── Pantalla de bienvenida ───────────────────────────────
   useEffect(() => {
     const timer = setTimeout(() => setBienvenida(false), 3000);
     return () => clearTimeout(timer);
   }, []);
 
+  // ─── Carrito helpers ──────────────────────────────────────
   function agregarAlCarrito(plato) {
     setCarrito(prev => [...prev, plato]);
   }
@@ -110,6 +123,7 @@ useEffect(() => {
     return acc;
   }, []);
 
+  // ─── Enviar pedido ────────────────────────────────────────
   async function enviarPedido() {
     if (enviando || carrito.length === 0) return;
     setEnviando(true);
@@ -150,28 +164,30 @@ useEffect(() => {
     }
   }
 
+  // ─── Llamar al mesero ─────────────────────────────────────
   async function llamarMesero() {
-  if (llamandoMesero) return;
-  setLlamandoMesero(true);
-  try {
-    await addDoc(collection(db, 'restaurantes', restauranteId, 'pedidos'), {
-      mesa: numeroMesa,
-      items: [],
-      total: 0,
-      estado: 'pendiente',
-      tipo: 'llamada',
-      nota: '🔔 Mesa solicita atención',
-      creadoEn: serverTimestamp(),
-    });
-    setTimeout(() => setLlamandoMesero(false), 10000);
-  } catch (e) {
-    console.error('Error llamando mesero:', e);
-    setLlamandoMesero(false);
+    if (llamandoMesero) return;
+    setLlamandoMesero(true);
+    try {
+      await addDoc(collection(db, 'restaurantes', restauranteId, 'pedidos'), {
+        mesa: numeroMesa,
+        items: [],
+        total: 0,
+        estado: 'pendiente',
+        tipo: 'llamada',
+        nota: '🔔 Mesa solicita atención',
+        creadoEn: serverTimestamp(),
+      });
+      setTimeout(() => setLlamandoMesero(false), 10000);
+    } catch (e) {
+      console.error('Error llamando mesero:', e);
+      setLlamandoMesero(false);
+    }
   }
-}
 
   const categorias = [...new Set(platos.map((p) => p.categoria))];
 
+  // ─── Pantalla de bienvenida ───────────────────────────────
   if (bienvenida) {
     return (
       <div className="min-h-screen text-white font-serif flex flex-col items-center justify-center gap-4"
@@ -184,9 +200,11 @@ useEffect(() => {
     );
   }
 
+  // ─── Vista principal ──────────────────────────────────────
   return (
     <div className="min-h-screen bg-neutral-950 text-white font-serif">
 
+      {/* Header */}
       <div className="relative h-48 flex items-end justify-center pb-6"
         style={{ background: 'linear-gradient(to bottom, #1a0a00, #0a0a0a)' }}>
         <div className="text-center">
@@ -195,6 +213,55 @@ useEffect(() => {
         </div>
       </div>
 
+      {/* Barra de estado del pedido */}
+      {estadoMesa && (
+        <div className={`w-full py-3 text-center text-sm font-bold tracking-widest uppercase ${
+          estadoMesa === 'listo' ? 'bg-green-500 text-white' : 'bg-amber-400 text-black'
+        }`}>
+          {estadoMesa === 'listo' ? '✓ Tu pedido está listo' : '🍳 Tu pedido está siendo preparado'}
+        </div>
+      )}
+
+      {/* Historial de visita */}
+      {pedidosMesa.length > 0 && (
+        <div className="max-w-lg mx-auto px-4 pt-4">
+          <button
+            onClick={() => setHistorialAbierto(!historialAbierto)}
+            className="w-full text-xs text-neutral-500 hover:text-amber-400 transition-colors text-left">
+            {historialAbierto ? '▼' : '▶'} Ver lo que has pedido esta visita
+          </button>
+          {historialAbierto && (
+            <div className="border border-neutral-800 p-4 mt-2 mb-2 space-y-3">
+              {pedidosMesa.map((p, i) => (
+                <div key={i} className="border-b border-neutral-800 pb-2 last:border-0">
+                  <div className="flex justify-between items-start">
+                    <ul className="text-neutral-400 text-xs space-y-0.5">
+                      {Object.values(
+                        (p.items || []).reduce((acc, item) => {
+                          if (!acc[item.nombre]) acc[item.nombre] = { ...item, cantidad: 0 };
+                          acc[item.nombre].cantidad += 1;
+                          return acc;
+                        }, {})
+                      ).map((item, j) => (
+                        <li key={j}>{item.nombre} x{item.cantidad}</li>
+                      ))}
+                    </ul>
+                    <p className="text-amber-400 text-xs font-bold ml-4">RD${p.total}</p>
+                  </div>
+                </div>
+              ))}
+              <div className="flex justify-between pt-1">
+                <span className="text-xs text-neutral-500">Total acumulado</span>
+                <span className="text-amber-400 font-bold text-sm">
+                  RD${pedidosMesa.reduce((sum, p) => sum + (p.total || 0), 0)}
+                </span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Categorías o lista de platos */}
       {!categoriaActiva ? (
         <div className="max-w-lg mx-auto px-4 py-8 space-y-3">
           {categorias.map((cat) => (
@@ -283,18 +350,19 @@ useEffect(() => {
           </div>
         </div>
       )}
-<div className="fixed bottom-0 left-0 right-0 pb-safe">
-  {carrito.length === 0 && (
-    <div className="bg-neutral-900 border-t border-neutral-800 px-4 py-3 flex justify-center">
-      <button
-        onClick={llamarMesero}
-        disabled={llamandoMesero}
-        className="border border-neutral-600 text-neutral-400 px-6 py-2 text-sm hover:border-amber-400 hover:text-amber-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
-        {llamandoMesero ? '✓ Mesero notificado' : '🔔 Llamar al mesero'}
-      </button>
-    </div>
-  )}
-</div>
+
+      {/* Botón llamar al mesero — solo cuando carrito vacío */}
+      {carrito.length === 0 && (
+        <div className="fixed bottom-0 left-0 right-0 bg-neutral-900 border-t border-neutral-800 px-4 py-3 flex justify-center">
+          <button
+            onClick={llamarMesero}
+            disabled={llamandoMesero}
+            className="border border-neutral-600 text-neutral-400 px-6 py-2 text-sm hover:border-amber-400 hover:text-amber-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+            {llamandoMesero ? '✓ Mesero notificado' : '🔔 Llamar al mesero'}
+          </button>
+        </div>
+      )}
+
       {/* Carrito */}
       {carrito.length > 0 && (
         <div className="fixed bottom-0 left-0 right-0 bg-neutral-900 border-t border-neutral-800">
@@ -339,6 +407,7 @@ useEffect(() => {
           )}
         </div>
       )}
+
     </div>
   );
 }
