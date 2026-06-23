@@ -67,7 +67,11 @@ function Menu() {
         setMesasPendientes(mesas.size);
 
         // Estado del pedido de esta mesa
-        const deMiMesa = todos.filter(p => p.mesa === numeroMesa && p.estado !== 'archivado');
+        const deMiMesa = todos.filter(p => 
+  p.mesa === numeroMesa && 
+  p.estado !== 'archivado' && 
+  p.tipo !== 'llamada'
+);
         if (deMiMesa.length === 0) {
           setEstadoMesa(null);
         } else if (deMiMesa.some(p => p.estado === 'pendiente')) {
