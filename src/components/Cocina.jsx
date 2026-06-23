@@ -4,7 +4,7 @@ import { db } from '../firebase';
 import { useParams } from 'react-router-dom';
 import { signOut } from 'firebase/auth';
 import { auth } from '../firebase';
-
+import { collection, onSnapshot, updateDoc, doc, query, where, Timestamp } from 'firebase/firestore';
 function Cocina() {
   const { restauranteId } = useParams();
   const [pedidos, setPedidos] = useState([]);
@@ -31,20 +31,25 @@ function Cocina() {
       console.error('Error reproduciendo sonido:', e);
     }
   }
+useEffect(() => {
+  const inicioDia = new Date();
+  inicioDia.setHours(0, 0, 0, 0);
 
-  useEffect(() => {
-    const unsubscribe = onSnapshot(
+  const unsubscribe = onSnapshot(
+    query(
       collection(db, 'restaurantes', restauranteId, 'pedidos'),
-      (snapshot) => {
-        const datos = snapshot.docs
-          .map((d) => ({ id: d.id, ...d.data() }))
-          .filter((p) => p.estado !== 'archivado');
-        setPedidos(datos);
-      },
-      (err) => console.error('Error en pedidos de cocina:', err)
-    );
-    return () => unsubscribe();
-  }, [restauranteId]);
+      where('creadoEn', '>=', Timestamp.fromDate(inicioDia))
+    ),
+    (snapshot) => {
+      const datos = snapshot.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .filter((p) => p.estado !== 'archivado');
+      setPedidos(datos);
+    },
+    (err) => console.error('Error en pedidos de cocina:', err)
+  );
+  return () => unsubscribe();
+}, [restauranteId]);
 
   useEffect(() => {
     if (cantidadAnterior !== null && pedidos.length > cantidadAnterior) {

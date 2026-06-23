@@ -1,12 +1,13 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, lazy, Suspense } from "react";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { onAuthStateChanged } from "firebase/auth";
-import { auth } from "../firebase";
-import Menu from "./Menu";
-import Admin from "./Admin";
-import Cocina from "./Cocina";
-import PanelMaestro from "./PanelMaestro";
-import Login from "./Login";
+import { auth } from "./firebase";
+
+const Menu = lazy(() => import("./components/Menu"));
+const Admin = lazy(() => import("./components/Admin"));
+const Cocina = lazy(() => import("./components/Cocina"));
+const PanelMaestro = lazy(() => import("./components/PanelMaestro"));
+const Login = lazy(() => import("./components/Login"));
 
 function App() {
   const [usuario, setUsuario] = useState(null);
@@ -24,13 +25,16 @@ function App() {
 
   return (
     <BrowserRouter>
-      <Routes>
-        <Route path="/restaurante/:restauranteId/menu/:numeroMesa" element={<Menu />} />
-        <Route path="/restaurante/:restauranteId/admin" element={usuario ? <Admin /> : <Login />} />
-        <Route path="/restaurante/:restauranteId/cocina" element={usuario ? <Cocina /> : <Login />} />
-        <Route path="/maestro" element={usuario ? <PanelMaestro /> : <Login />} />
-      </Routes>
+      <Suspense fallback={<div className="min-h-screen bg-neutral-950" />}>
+        <Routes>
+          <Route path="/restaurante/:restauranteId/menu/:numeroMesa" element={<Menu />} />
+          <Route path="/restaurante/:restauranteId/admin" element={usuario ? <Admin /> : <Login />} />
+          <Route path="/restaurante/:restauranteId/cocina" element={usuario ? <Cocina /> : <Login />} />
+          <Route path="/maestro" element={usuario ? <PanelMaestro /> : <Login />} />
+        </Routes>
+      </Suspense>
     </BrowserRouter>
   );
 }
+
 export default App;
