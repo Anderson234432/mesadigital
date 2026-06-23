@@ -10,6 +10,7 @@ import { storage } from "../firebase";
 import { signOut } from 'firebase/auth';
 import { auth } from '../firebase';
 import imageCompression from 'browser-image-compression';
+import jsPDF from 'jspdf';
 
 export default function Admin() {
   const { restauranteId } = useParams();
@@ -32,7 +33,66 @@ export default function Admin() {
     setMensaje({ texto, tipo });
     setTimeout(() => setMensaje({ texto: '', tipo: '' }), 3500);
   }
+function generarCierrePDF() {
+  const pdf = new jsPDF();
+  const fechaStr = hoy.toLocaleDateString('es-DO', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 
+  // Encabezado
+  pdf.setFontSize(20);
+  pdf.text('Cierre de Caja', 105, 20, { align: 'center' });
+  pdf.setFontSize(11);
+  pdf.text(fechaStr, 105, 28, { align: 'center' });
+  pdf.line(15, 32, 195, 32);
+
+  // Resumen
+  pdf.setFontSize(13);
+  pdf.text(`Total del día: RD$${totalDia}`, 15, 42);
+  pdf.text(`Pedidos: ${pedidos.length}`, 15, 50);
+  pdf.line(15, 55, 195, 55);
+
+  // Platos más pedidos
+  const conteo = {};
+  pedidos.forEach(p => {
+    (p.items || []).forEach(item => {
+      if (!conteo[item.nombre]) conteo[item.nombre] = 0;
+      conteo[item.nombre] += 1;
+    });
+  });
+  const ranking = Object.entries(conteo).sort((a, b) => b[1] - a[1]).slice(0, 10);
+
+  pdf.setFontSize(12);
+  pdf.text('Platos más pedidos:', 15, 63);
+  pdf.setFontSize(10);
+  ranking.forEach(([nombre, cantidad], i) => {
+    pdf.text(`${i + 1}. ${nombre} — ${cantidad} ${cantidad === 1 ? 'vez' : 'veces'}`, 20, 71 + i * 8);
+  });
+
+  const offsetDetalle = 75 + ranking.length * 8;
+  pdf.line(15, offsetDetalle, 195, offsetDetalle);
+
+  // Detalle de pedidos
+  pdf.setFontSize(12);
+  pdf.text('Detalle de pedidos:', 15, offsetDetalle + 8);
+  pdf.setFontSize(9);
+
+  let y = offsetDetalle + 16;
+  [...pedidos]
+    .sort((a, b) => (a.creadoEn?.toMillis() || 0) - (b.creadoEn?.toMillis() || 0))
+    .forEach(p => {
+      if (y > 270) { pdf.addPage(); y = 15; }
+      const hora = p.creadoEn?.toDate().toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit' });
+      pdf.text(`Mesa ${p.mesa} — ${hora} — RD$${p.total}`, 15, y);
+      y += 6;
+      (p.items || []).forEach(item => {
+        if (y > 270) { pdf.addPage(); y = 15; }
+        pdf.text(`   · ${item.nombre}`, 15, y);
+        y += 5;
+      });
+      y += 2;
+    });
+
+  pdf.save(`cierre-${hoy.toISOString().slice(0, 10)}.pdf`);
+}
   useEffect(() => {
     const cargarRestaurante = async () => {
       try {
@@ -357,14 +417,18 @@ export default function Admin() {
                 style={{ width: `${(cantidad / maximo) * 100}%` }}
               />
             </div>
-          </div>
-        ))}
-      </div>
-    );
-  })()}
-</div>
-        </div>
-
+              </div>
+              ))}
+              </div>
+              );
+              })()}
+              </div>
+            </div>
+<button
+  onClick={generarCierrePDF}
+  className="mt-6 bg-amber-400 text-black px-6 py-2 font-bold hover:bg-amber-300 transition-colors w-full">
+  ⬇ Descargar cierre de caja PDF
+</button>
       </div>
     </div>
   );
