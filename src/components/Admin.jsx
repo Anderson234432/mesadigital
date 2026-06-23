@@ -1,13 +1,8 @@
 import { useState, useEffect } from "react";
 import { db } from "../firebase";
 import {
-  collection,
-  addDoc,
-  updateDoc,
-  deleteDoc,
-  doc,
-  onSnapshot,
-  getDoc,
+  collection, addDoc, updateDoc, deleteDoc,
+  doc, onSnapshot, getDoc, query, where, Timestamp,
 } from "firebase/firestore";
 import { useParams } from 'react-router-dom';
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
@@ -18,87 +13,135 @@ import { auth } from '../firebase';
 export default function Admin() {
   const { restauranteId } = useParams();
   const [platos, setPlatos] = useState([]);
+  const [pedidos, setPedidos] = useState([]);
   const [form, setForm] = useState({
-    nombre: "",
-    precio: "",
-    categoria: "",
-    descripcion: "",
-    imagenUrl: "",
-    disponible: true,
-    TiempoMin: "",
+    nombre: "", precio: "", categoria: "",
+    descripcion: "", imagenUrl: "", disponible: true, tiempoMin: "",
   });
   const [editandoId, setEditandoId] = useState(null);
   const [imagen, setImagen] = useState(null);
   const [fileKey, setFileKey] = useState(0);
-  const [tiempos, setTiempos] = useState({});
   const [tiemposForm, setTiemposForm] = useState({});
+  const [guardando, setGuardando] = useState(false);
+  const [mensaje, setMensaje] = useState({ texto: '', tipo: '' });
+
+  const formVacio = { nombre: "", precio: "", categoria: "", descripcion: "", imagenUrl: "", disponible: true, tiempoMin: "" };
+
+  function mostrarMensaje(texto, tipo = 'ok') {
+    setMensaje({ texto, tipo });
+    setTimeout(() => setMensaje({ texto: '', tipo: '' }), 3500);
+  }
 
   useEffect(() => {
     const cargarRestaurante = async () => {
-      const restauranteDoc = await getDoc(doc(db, 'restaurantes', restauranteId));
-      if (restauranteDoc.exists()) {
-        const t = restauranteDoc.data().tiempos || {};
-        setTiempos(t);
-        setTiemposForm(t);
+      try {
+        const snap = await getDoc(doc(db, 'restaurantes', restauranteId));
+        if (snap.exists()) setTiemposForm(snap.data().tiempos || {});
+      } catch (e) {
+        console.error('Error cargando restaurante:', e);
       }
     };
     cargarRestaurante();
 
-    const unsub = onSnapshot(collection(db, "restaurantes", restauranteId, "platos"), (snap) => {
-      setPlatos(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-    });
-    return unsub;
-  }, []);
+    const unsubPlatos = onSnapshot(
+      collection(db, "restaurantes", restauranteId, "platos"),
+      (snap) => setPlatos(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
+      (err) => console.error('Error en platos:', err)
+    );
+
+    const inicioDia = new Date();
+    inicioDia.setHours(0, 0, 0, 0);
+
+    const unsubPedidos = onSnapshot(
+      query(
+        collection(db, "restaurantes", restauranteId, "pedidos"),
+        where("creadoEn", ">=", Timestamp.fromDate(inicioDia))
+      ),
+      (snap) => setPedidos(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
+      (err) => console.error('Error en pedidos:', err)
+    );
+
+    return () => {
+      unsubPlatos();
+      unsubPedidos();
+    };
+  }, [restauranteId]);
 
   async function cerrarSesion() {
-    await signOut(auth);
+    try { await signOut(auth); } catch (e) { console.error(e); }
   }
 
-  const handleChange = (e) =>
-    setForm({ ...form, [e.target.name]: e.target.value });
+  const handleChange = (e) => setForm({ ...form, [e.target.name]: e.target.value });
 
   async function subirImagen() {
     if (!imagen) return null;
+    if (imagen.size > 3 * 1024 * 1024) {
+      mostrarMensaje('La imagen supera los 3MB. Usa una imagen más pequeña.', 'error');
+      return 'ERROR';
+    }
     const storageRef = ref(storage, `platos/${Date.now()}_${imagen.name}`);
     await uploadBytes(storageRef, imagen);
-    const url = await getDownloadURL(storageRef);
-    return url;
+    return await getDownloadURL(storageRef);
   }
 
   const guardar = async () => {
-    const urlImagen = await subirImagen();
-    const datos = {
-      ...form,
-      precio: Number(form.precio),
-      imagenUrl: urlImagen || form.imagenUrl,
-    };
-    if (editandoId) {
-      await updateDoc(doc(db, "restaurantes", restauranteId, "platos", editandoId), datos);
-      setEditandoId(null);
-    } else {
-      await addDoc(collection(db, "restaurantes", restauranteId, "platos"), datos);
+    if (!form.nombre || !form.precio || !form.categoria) {
+      mostrarMensaje('Nombre, precio y categoría son obligatorios.', 'error');
+      return;
     }
-    setForm({ nombre: "", precio: "", categoria: "", descripcion: "", imagenUrl: "", disponible: true });
-    setImagen(null);
-    setFileKey(k => k + 1);
+    setGuardando(true);
+    try {
+      const urlImagen = await subirImagen();
+      if (urlImagen === 'ERROR') { setGuardando(false); return; }
+
+      const datos = {
+        ...form,
+        precio: Number(form.precio),
+        tiempoMin: Number(form.tiempoMin) || 0,
+        imagenUrl: urlImagen || form.imagenUrl,
+      };
+
+      if (editandoId) {
+        await updateDoc(doc(db, "restaurantes", restauranteId, "platos", editandoId), datos);
+        setEditandoId(null);
+      } else {
+        await addDoc(collection(db, "restaurantes", restauranteId, "platos"), datos);
+      }
+
+      setForm(formVacio);
+      setImagen(null);
+      setFileKey(k => k + 1);
+      mostrarMensaje('Plato guardado correctamente.', 'ok');
+    } catch (e) {
+      console.error('Error guardando plato:', e);
+      mostrarMensaje('Error al guardar. Intenta de nuevo.', 'error');
+    } finally {
+      setGuardando(false);
+    }
   };
 
-  const editar = (plato) => {
-    setForm(plato);
-    setEditandoId(plato.id);
-  };
+  const editar = (plato) => { setForm(plato); setEditandoId(plato.id); };
 
   const eliminar = async (id) => {
-    await deleteDoc(doc(db, "restaurantes", restauranteId, "platos", id));
+    try { await deleteDoc(doc(db, "restaurantes", restauranteId, "platos", id)); }
+    catch (e) { console.error('Error eliminando:', e); }
   };
 
   async function guardarTiempos() {
-    await updateDoc(doc(db, 'restaurantes', restauranteId), { tiempos: tiemposForm });
-    alert('Tiempos guardados');
+    try {
+      await updateDoc(doc(db, 'restaurantes', restauranteId), { tiempos: tiemposForm });
+      mostrarMensaje('Tiempos guardados.', 'ok');
+    } catch (e) {
+      mostrarMensaje('Error al guardar tiempos.', 'error');
+    }
   }
+
+  const hoy = new Date();
+  const totalDia = pedidos.reduce((sum, p) => sum + (p.total || 0), 0);
 
   return (
     <div className="min-h-screen bg-neutral-950 text-white font-serif">
+
       {/* Header */}
       <div className="bg-neutral-900 border-b border-neutral-800 px-6 py-4 flex justify-between items-center">
         <div>
@@ -111,42 +154,59 @@ export default function Admin() {
         </button>
       </div>
 
+      {/* Notificación */}
+      {mensaje.texto && (
+        <div className="fixed top-4 left-0 right-0 flex justify-center z-50">
+          <div className={`px-6 py-3 font-bold text-sm text-center max-w-sm mx-4 ${mensaje.tipo === 'ok' ? 'bg-amber-400 text-black' : 'bg-red-500 text-white'}`}>
+            {mensaje.texto}
+          </div>
+        </div>
+      )}
+
       <div className="max-w-lg mx-auto px-4 py-6">
+
         {/* Formulario */}
         <div className="border border-neutral-800 p-6 space-y-3 mb-8">
           <h2 className="text-amber-400 text-xs tracking-widest uppercase mb-4">
             {editandoId ? 'Editar plato' : 'Nuevo plato'}
           </h2>
-          <input name="nombre" placeholder="Nombre" value={form.nombre} onChange={handleChange}
+          <input name="nombre" placeholder="Nombre *" value={form.nombre} onChange={handleChange}
             className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400" />
-          <input name="precio" placeholder="Precio" type="number" value={form.precio} onChange={handleChange}
+          <input name="precio" placeholder="Precio *" type="number" value={form.precio} onChange={handleChange}
             className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400" />
-          <input name="categoria" placeholder="Categoría" value={form.categoria} onChange={handleChange}
+          <input name="categoria" placeholder="Categoría *" value={form.categoria} onChange={handleChange}
             className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400" />
+
+          {form.categoria?.toLowerCase() === 'bebidas' ? (
+            <p className="text-xs text-amber-400 border border-amber-400 border-opacity-30 bg-amber-400 bg-opacity-5 px-3 py-2">
+              Las bebidas no necesitan tiempo de preparación — su tiempo se configura en "Tiempos de espera".
+            </p>
+          ) : (
             <input name="tiempoMin" placeholder="Tiempo de preparación (min)" type="number" value={form.tiempoMin || ''} onChange={handleChange}
-  className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400" />
+              className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400" />
+          )}
+
           <input name="descripcion" placeholder="Descripción" value={form.descripcion} onChange={handleChange}
             className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400" />
-          <input
-            key={fileKey}
-            type="file"
-            accept="image/*"
-            onChange={(e) => setImagen(e.target.files[0])}
-            className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-neutral-400 focus:outline-none focus:border-amber-400"
-          />
+          <div>
+            <input key={fileKey} type="file" accept="image/*"
+              onChange={(e) => setImagen(e.target.files[0])}
+              className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-neutral-400 focus:outline-none focus:border-amber-400" />
+            <p className="text-neutral-600 text-xs mt-1">Máximo 3MB</p>
+          </div>
           <input name="imagenUrl" placeholder="O pega una URL de imagen" value={form.imagenUrl} onChange={handleChange}
             className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400" />
+
           <div className="flex gap-3 pt-2">
-            <button onClick={guardar}
-              className="bg-amber-400 text-black px-6 py-2 font-bold hover:bg-amber-300 transition-colors">
-              {editandoId ? 'Actualizar' : 'Agregar'}
+            <button onClick={guardar} disabled={guardando}
+              className="bg-amber-400 text-black px-6 py-2 font-bold hover:bg-amber-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+              {guardando ? 'Guardando...' : editandoId ? 'Actualizar' : 'Agregar'}
             </button>
             {editandoId && (
-              <button onClick={() => setEditandoId(null)}
+              <button onClick={() => { setEditandoId(null); setForm(formVacio); }}
                 className="border border-neutral-600 text-neutral-400 px-6 py-2 hover:border-neutral-400 transition-colors">
                 Cancelar
               </button>
-              
             )}
           </div>
         </div>
@@ -181,22 +241,69 @@ export default function Admin() {
         {/* Tiempos de espera */}
         <div className="border border-neutral-800 p-6 mt-8">
           <h2 className="text-amber-400 text-xs tracking-widest uppercase mb-4">Tiempos de espera</h2>
-          <div className="space-y-3">
-            <div className="flex items-center gap-3">
-              <label className="text-neutral-400 text-sm w-32">Bebidas (min)</label>
-              <input
-                type="number"
-                value={tiemposForm.bebidas || ''}
-                onChange={(e) => setTiemposForm({ ...tiemposForm, bebidas: Number(e.target.value) })}
-                className="w-24 bg-neutral-900 border border-neutral-700 px-3 py-2 text-white focus:outline-none focus:border-amber-400"
-              />
-            </div>
+          <div className="flex items-center gap-3">
+            <label className="text-neutral-400 text-sm w-32">Bebidas (min)</label>
+            <input type="number" value={tiemposForm.bebidas || ''}
+              onChange={(e) => setTiemposForm({ ...tiemposForm, bebidas: Number(e.target.value) })}
+              className="w-24 bg-neutral-900 border border-neutral-700 px-3 py-2 text-white focus:outline-none focus:border-amber-400" />
           </div>
           <button onClick={guardarTiempos}
             className="mt-4 bg-amber-400 text-black px-6 py-2 font-bold hover:bg-amber-300 transition-colors">
             Guardar tiempos
           </button>
         </div>
+
+        {/* Historial de ventas del día */}
+        <div className="border border-neutral-800 p-6 mt-8">
+          <h2 className="text-amber-400 text-xs tracking-widest uppercase mb-1">Ventas del día</h2>
+          <p className="text-neutral-500 text-xs mb-6">
+            {hoy.toLocaleDateString('es-DO', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+          </p>
+
+          <div className="border border-neutral-700 p-4 mb-6">
+            <p className="text-neutral-400 text-xs tracking-widest uppercase">Total del día</p>
+            <p className="text-3xl font-bold text-amber-400 mt-1">RD${totalDia}</p>
+            <p className="text-neutral-500 text-xs mt-1">{pedidos.length} pedido(s)</p>
+          </div>
+
+          <div className="space-y-4">
+            {pedidos.length === 0 && (
+              <p className="text-neutral-500 text-sm">No hay pedidos hoy todavía.</p>
+            )}
+            {[...pedidos]
+              .sort((a, b) => (b.creadoEn?.toMillis() || 0) - (a.creadoEn?.toMillis() || 0))
+              .map(p => (
+                <div key={p.id} className="border-b border-neutral-800 pb-4">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <p className="font-semibold">Mesa {p.mesa}</p>
+                      <p className="text-neutral-500 text-xs mb-2">
+                        {p.creadoEn?.toDate().toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit' })}
+                      </p>
+                      <ul className="text-neutral-400 text-xs space-y-0.5">
+                        {Object.values(
+                          (p.items || []).reduce((acc, item) => {
+                            if (!acc[item.nombre]) acc[item.nombre] = { ...item, cantidad: 0 };
+                            acc[item.nombre].cantidad += 1;
+                            return acc;
+                          }, {})
+                        ).map((item, i) => (
+                          <li key={i}>{item.nombre} x{item.cantidad}</li>
+                        ))}
+                      </ul>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-amber-400 font-bold">RD${p.total}</p>
+                      <span className={`text-xs ${p.estado === 'archivado' ? 'text-neutral-500' : p.estado === 'listo' ? 'text-green-400' : 'text-amber-400'}`}>
+                        {p.estado}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+          </div>
+        </div>
+
       </div>
     </div>
   );

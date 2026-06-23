@@ -7,38 +7,66 @@ function Menu() {
   const { restauranteId, numeroMesa } = useParams();
   const [platos, setPlatos] = useState([]);
   const [carrito, setCarrito] = useState(() => {
-    const guardado = sessionStorage.getItem(`carrito_${restauranteId}`);
-    return guardado ? JSON.parse(guardado) : [];
+    try {
+      const guardado = sessionStorage.getItem(`carrito_${restauranteId}`);
+      return guardado ? JSON.parse(guardado) : [];
+    } catch {
+      return [];
+    }
   });
   const [restaurante, setRestaurante] = useState(null);
   const [bienvenida, setBienvenida] = useState(true);
   const [categoriaActiva, setCategoriaActiva] = useState(null);
   const [pedidoEnviado, setPedidoEnviado] = useState('');
-const [carritoAbierto, setCarritoAbierto] = useState(false);
-const [nota, setNota] = useState('');
-const [tiemposRestaurante, setTiemposRestaurante] = useState({});
-const [mesasPendientes, setMesasPendientes] = useState(0);
+  const [carritoAbierto, setCarritoAbierto] = useState(false);
+  const [nota, setNota] = useState('');
+  const [tiemposRestaurante, setTiemposRestaurante] = useState({});
+  const [mesasPendientes, setMesasPendientes] = useState(0);
+  const [enviando, setEnviando] = useState(false);
+  const [error, setError] = useState('');
+
   useEffect(() => {
     const cargarRestaurante = async () => {
-      const restauranteDoc = await getDoc(doc(db, 'restaurantes', restauranteId));
-      if (restauranteDoc.exists()) setRestaurante(restauranteDoc.data());
-      const t = restauranteDoc.data().tiempos || {};
-setTiemposRestaurante(t);
+      try {
+        const snap = await getDoc(doc(db, 'restaurantes', restauranteId));
+        if (snap.exists()) {
+          setRestaurante(snap.data());
+          setTiemposRestaurante(snap.data().tiempos || {});
+        }
+      } catch (e) {
+        console.error('Error cargando restaurante:', e);
+      }
     };
     cargarRestaurante();
 
-    const unsubscribe = onSnapshot(collection(db, 'restaurantes', restauranteId, 'platos'), (snapshot) => {
-      const datos = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
-      setPlatos(datos);
-    });
-return () => {
-  unsubscribe();
-  unsubPedidos();
-};
+    const unsubPlatos = onSnapshot(
+      collection(db, 'restaurantes', restauranteId, 'platos'),
+      (snapshot) => setPlatos(snapshot.docs.map((d) => ({ id: d.id, ...d.data() }))),
+      (err) => console.error('Error en platos:', err)
+    );
+
+    const unsubPedidos = onSnapshot(
+      collection(db, 'restaurantes', restauranteId, 'pedidos'),
+      (snapshot) => {
+        const pendientes = snapshot.docs.filter(d => d.data().estado === 'pendiente');
+        const mesas = new Set(pendientes.map(d => d.data().mesa));
+        setMesasPendientes(mesas.size);
+      },
+      (err) => console.error('Error en pedidos:', err)
+    );
+
+    return () => {
+      unsubPlatos();
+      unsubPedidos();
+    };
   }, [restauranteId]);
 
   useEffect(() => {
-    sessionStorage.setItem(`carrito_${restauranteId}`, JSON.stringify(carrito));
+    try {
+      sessionStorage.setItem(`carrito_${restauranteId}`, JSON.stringify(carrito));
+    } catch (e) {
+      console.error('Error guardando carrito:', e);
+    }
   }, [carrito, restauranteId]);
 
   useEffect(() => {
@@ -51,72 +79,80 @@ return () => {
   }
 
   const total = carrito.reduce((suma, item) => suma + item.precio, 0);
-async function enviarPedido() {
-  if (carrito.length === 0) return;
 
-  // Calcular tiempo ANTES de enviar
-  const tieneBebidas = carrito.some(p => p.categoria?.toLowerCase() === 'bebidas');
-  const tieneComida = carrito.some(p => p.categoria?.toLowerCase() !== 'bebidas');
+  const carritoAgrupado = carrito.reduce((acc, item) => {
+    const existe = acc.find(i => i.id === item.id);
+    if (existe) {
+      existe.cantidad += 1;
+      existe.subtotal += item.precio;
+    } else {
+      acc.push({ ...item, cantidad: 1, subtotal: item.precio });
+    }
+    return acc;
+  }, []);
 
-  const tiempoBebida = tiemposRestaurante.bebidas || 5;
-  const tiempoComida = tieneComida
-    ? Math.max(...carrito.filter(p => p.categoria?.toLowerCase() !== 'bebidas').map(p => p.tiempoMin || 15)) * (mesasPendientes + 1)
-    : null;
+  async function enviarPedido() {
+    if (enviando || carrito.length === 0) return;
+    setEnviando(true);
+    setError('');
 
-  let mensaje = '';
-  if (tieneBebidas) mensaje += `🥤 Tu bebida tardará aprox ${tiempoBebida} min. `;
-  if (tieneComida) mensaje += `🍽️ Tu comida tardará aprox ${tiempoComida} min.`;
+    try {
+      const tieneBebidas = carrito.some(p => p.categoria?.toLowerCase() === 'bebidas');
+      const tieneComida = carrito.some(p => p.categoria?.toLowerCase() !== 'bebidas');
+      const tiempoBebida = tiemposRestaurante.bebidas || 5;
+      const tiempoComida = tieneComida
+        ? Math.max(...carrito.filter(p => p.categoria?.toLowerCase() !== 'bebidas').map(p => p.tiempoMin || 15)) * (mesasPendientes + 1)
+        : null;
 
-  // Enviar pedido después
-  await addDoc(collection(db, 'restaurantes', restauranteId, 'pedidos'), {
-    mesa: numeroMesa,
-    items: carrito.map((p) => ({ nombre: p.nombre, precio: p.precio })),
-    total: total,
-    estado: 'pendiente',
-    nota: nota,
-    creadoEn: serverTimestamp(),
-  });
+      let mensaje = '';
+      if (tieneBebidas) mensaje += `🥤 Tu bebida tardará aprox ${tiempoBebida} min. `;
+      if (tieneComida) mensaje += `🍽️ Tu comida tardará aprox ${tiempoComida} min.`;
 
-  setCarrito([]);
-  sessionStorage.removeItem(`carrito_${restauranteId}`);
-  setPedidoEnviado(mensaje);
-  setTimeout(() => setPedidoEnviado(''), 5000);
-}
+      await addDoc(collection(db, 'restaurantes', restauranteId, 'pedidos'), {
+        mesa: numeroMesa,
+        items: carrito.map((p) => ({ nombre: p.nombre, precio: p.precio })),
+        total,
+        estado: 'pendiente',
+        nota,
+        creadoEn: serverTimestamp(),
+      });
+
+      setCarrito([]);
+      setNota('');
+      sessionStorage.removeItem(`carrito_${restauranteId}`);
+      setPedidoEnviado(mensaje || '¡Pedido enviado!');
+      setTimeout(() => setPedidoEnviado(''), 5000);
+    } catch (e) {
+      console.error('Error enviando pedido:', e);
+      setError('Error al enviar el pedido. Intenta de nuevo.');
+      setTimeout(() => setError(''), 4000);
+    } finally {
+      setEnviando(false);
+    }
+  }
 
   const categorias = [...new Set(platos.map((p) => p.categoria))];
-const unsubPedidos = onSnapshot(collection(db, 'restaurantes', restauranteId, 'pedidos'), (snapshot) => {
-  const pendientes = snapshot.docs.filter(d => d.data().estado === 'pendiente');
-  const mesas = new Set(pendientes.map(d => d.data().mesa));
-  setMesasPendientes(mesas.size);
-});
-const carritoAgrupado = carrito.reduce((acc, item) => {
-  const existe = acc.find(i => i.id === item.id);
-  if (existe) {
-    existe.cantidad += 1;
-    existe.subtotal += item.precio;
-  } else {
-    acc.push({ ...item, cantidad: 1, subtotal: item.precio });
-  }
-  return acc;
-}, []);
 
-if (bienvenida) {
+  if (bienvenida) {
     return (
-      <div className="min-h-screen bg-neutral-950 text-white font-serif flex flex-col items-center justify-center gap-4">
+      <div className="min-h-screen text-white font-serif flex flex-col items-center justify-center gap-4"
+        style={{ background: 'linear-gradient(to bottom, #1a0a00, #0a0a0a)' }}>
         <p className="text-amber-400 text-xs tracking-widest uppercase">Bienvenido a</p>
-        <h1 className="text-4xl font-bold text-center">{restaurante?.nombre || 'Menú'}</h1>
-        <p className="text-neutral-500 text-sm">Preparando tu menú...</p>
+        <h1 className="text-4xl font-bold text-center px-6">{restaurante?.nombre || ''}</h1>
+        <div className="border-t border-neutral-700 w-12 mt-2" />
+        <p className="text-neutral-400 text-sm tracking-widest uppercase">Mesa {numeroMesa}</p>
       </div>
     );
   }
 
   return (
     <div className="min-h-screen bg-neutral-950 text-white font-serif">
+
       <div className="relative h-48 flex items-end justify-center pb-6"
         style={{ background: 'linear-gradient(to bottom, #1a0a00, #0a0a0a)' }}>
         <div className="text-center">
           <p className="text-amber-400 text-sm tracking-widest uppercase">Bienvenido</p>
-          <h1 className="text-3xl font-bold tracking-wide">{restaurante?.nombre || 'Menú'}</h1>
+          <h1 className="text-3xl font-bold tracking-wide">{restaurante?.nombre || ''}</h1>
         </div>
       </div>
 
@@ -144,8 +180,12 @@ if (bienvenida) {
             {platos.filter((p) => p.categoria === categoriaActiva && p.disponible !== false).map((plato) => (
               <div key={plato.id} className="border-b border-neutral-800 pb-4">
                 {plato.imagenUrl && (
-                  <img src={plato.imagenUrl} alt={plato.nombre}
-                    className="w-full object-contain mb-3 max-h-64" />
+                  <img
+                    src={plato.imagenUrl}
+                    alt={plato.nombre}
+                    loading="lazy"
+                    className="w-full object-contain mb-3 max-h-64"
+                  />
                 )}
                 <div className="flex justify-between items-center">
                   <div>
@@ -154,32 +194,32 @@ if (bienvenida) {
                     <p className="text-amber-400 mt-1">RD${plato.precio}</p>
                   </div>
                   <div className="flex items-center gap-2 ml-4">
-  {carritoAgrupado.find(i => i.id === plato.id) ? (
-    <>
-      <button onClick={() => setCarrito(prev => {
-        const idx = [...prev].map(i => i.id).lastIndexOf(plato.id);
-        const nuevo = [...prev];
-        nuevo.splice(idx, 1);
-        return nuevo;
-      })}
-        className="border border-neutral-600 text-white w-7 h-7 flex items-center justify-center hover:border-red-400 hover:text-red-400 transition-colors">
-        −
-      </button>
-      <span className="text-white w-4 text-center">
-        {carritoAgrupado.find(i => i.id === plato.id)?.cantidad}
-      </span>
-      <button onClick={() => agregarAlCarrito(plato)}
-        className="border border-amber-400 text-amber-400 w-7 h-7 flex items-center justify-center hover:bg-amber-400 hover:text-black transition-colors">
-        +
-      </button>
-    </>
-  ) : (
-    <button onClick={() => agregarAlCarrito(plato)}
-      className="border border-amber-400 text-amber-400 px-3 py-1 text-sm hover:bg-amber-400 hover:text-black transition-colors">
-      + Agregar
-    </button>
-  )}
-</div>
+                    {carritoAgrupado.find(i => i.id === plato.id) ? (
+                      <>
+                        <button onClick={() => setCarrito(prev => {
+                          const idx = [...prev].map(i => i.id).lastIndexOf(plato.id);
+                          const nuevo = [...prev];
+                          nuevo.splice(idx, 1);
+                          return nuevo;
+                        })}
+                          className="border border-neutral-600 text-white w-7 h-7 flex items-center justify-center hover:border-red-400 hover:text-red-400 transition-colors">
+                          −
+                        </button>
+                        <span className="text-white w-4 text-center">
+                          {carritoAgrupado.find(i => i.id === plato.id)?.cantidad}
+                        </span>
+                        <button onClick={() => agregarAlCarrito(plato)}
+                          className="border border-amber-400 text-amber-400 w-7 h-7 flex items-center justify-center hover:bg-amber-400 hover:text-black transition-colors">
+                          +
+                        </button>
+                      </>
+                    ) : (
+                      <button onClick={() => agregarAlCarrito(plato)}
+                        className="border border-amber-400 text-amber-400 px-3 py-1 text-sm hover:bg-amber-400 hover:text-black transition-colors">
+                        + Agregar
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             ))}
@@ -187,14 +227,25 @@ if (bienvenida) {
         </div>
       )}
 
+      {/* Notificación pedido enviado */}
       {pedidoEnviado && (
         <div className="fixed top-4 left-0 right-0 flex justify-center z-50">
-          <div className="bg-amber-400 text-black px-6 py-3 font-bold text-sm text-center">
-          {pedidoEnviado}
-        </div>
+          <div className="bg-amber-400 text-black px-6 py-3 font-bold text-sm text-center max-w-sm mx-4">
+            {pedidoEnviado}
+          </div>
         </div>
       )}
 
+      {/* Notificación error */}
+      {error && (
+        <div className="fixed top-4 left-0 right-0 flex justify-center z-50">
+          <div className="bg-red-500 text-white px-6 py-3 font-bold text-sm text-center max-w-sm mx-4">
+            {error}
+          </div>
+        </div>
+      )}
+
+      {/* Carrito */}
       {carrito.length > 0 && (
         <div className="fixed bottom-0 left-0 right-0 bg-neutral-900 border-t border-neutral-800">
           <button onClick={() => setCarritoAbierto(!carritoAbierto)}
@@ -213,7 +264,13 @@ if (bienvenida) {
                   </div>
                 ))}
               </div>
-              
+              <textarea
+                value={nota}
+                onChange={(e) => setNota(e.target.value)}
+                placeholder="Nota para cocina (opcional)..."
+                rows={2}
+                className="w-full bg-neutral-800 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 text-sm focus:outline-none focus:border-amber-400 resize-none mb-3"
+              />
               <div className="flex justify-between items-center border-t border-neutral-700 pt-3">
                 <button onClick={() => {
                   setCarrito([]);
@@ -221,9 +278,11 @@ if (bienvenida) {
                 }} className="text-xs text-neutral-500 hover:text-red-400 transition-colors">
                   Cancelar
                 </button>
-                <button onClick={enviarPedido}
-                  className="bg-amber-400 text-black px-6 py-2 font-bold hover:bg-amber-300 transition-colors">
-                  Enviar pedido
+                <button
+                  onClick={enviarPedido}
+                  disabled={enviando}
+                  className="bg-amber-400 text-black px-6 py-2 font-bold hover:bg-amber-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                  {enviando ? 'Enviando...' : 'Enviar pedido'}
                 </button>
               </div>
             </div>
