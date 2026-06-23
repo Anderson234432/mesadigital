@@ -227,16 +227,26 @@ function Cocina() {
             ))}
 
             {/* Total y hora */}
-            {mesa.rondas.length > 0 && (
-              <>
-                <p className="text-amber-400 font-bold">Total: RD${mesa.total}</p>
-                <p className="text-neutral-500 text-xs mt-1">
-                  {mesa.primerPedido
-                    ? `${new Date(mesa.primerPedido).toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit' })} · ${tiempoTranscurrido(mesa.primerPedido)}`
-                    : ''}
-                </p>
-              </>
-            )}
+            {mesa.rondas.length > 0 && (() => {
+  const tiempoMax = Math.max(
+    ...mesa.rondas.flatMap(r => r.items.map(item => item.tiempoMin || 0)),
+    0
+  );
+  const umbral = (tiempoMax + 5) * 60 * 1000;
+  const demorado = mesa.estado === 'pendiente' && mesa.primerPedido && (ahora - mesa.primerPedido) > umbral;
+
+  return (
+    <>
+      <p className="text-amber-400 font-bold">Total: RD${mesa.total}</p>
+      <p className={`text-xs mt-1 ${demorado ? 'text-red-400 font-bold animate-pulse' : 'text-neutral-500'}`}>
+        {mesa.primerPedido
+          ? `${new Date(mesa.primerPedido).toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit' })} · ${tiempoTranscurrido(mesa.primerPedido)}`
+          : ''}
+        {demorado ? ' ⚠️ Pedido demorado' : ''}
+      </p>
+    </>
+  );
+})()}
 
             {/* Botones */}
             {mesa.estado === 'pendiente' && mesa.rondas.length > 0 && (

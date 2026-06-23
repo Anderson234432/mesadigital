@@ -143,7 +143,7 @@ function Menu() {
 
       await addDoc(collection(db, 'restaurantes', restauranteId, 'pedidos'), {
         mesa: numeroMesa,
-        items: carrito.map((p) => ({ nombre: p.nombre, precio: p.precio })),
+        items: carrito.map((p) => ({ nombre: p.nombre, precio: p.precio, tiempoMin: p.tiempoMin || 0 })),
         total,
         estado: 'pendiente',
         nota,
