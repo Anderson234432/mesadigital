@@ -278,7 +278,8 @@ export default function Admin() {
             <p className="text-3xl font-bold text-amber-400 mt-1">RD${totalDia}</p>
             <p className="text-neutral-500 text-xs mt-1">{pedidos.length} pedido(s)</p>
           </div>
-
+        
+        
           <div className="space-y-4">
             {pedidos.length === 0 && (
               <p className="text-neutral-500 text-sm">No hay pedidos hoy todavía.</p>
@@ -315,6 +316,53 @@ export default function Admin() {
                 </div>
               ))}
           </div>
+
+          {/* Estadísticas — platos más pedidos */}
+<div className="border border-neutral-800 p-6 mt-8">
+  <h2 className="text-amber-400 text-xs tracking-widest uppercase mb-1">Platos más pedidos</h2>
+  <p className="text-neutral-500 text-xs mb-6">Basado en los pedidos de hoy</p>
+
+  {(() => {
+    const conteo = {};
+    pedidos.forEach(p => {
+      (p.items || []).forEach(item => {
+        if (!conteo[item.nombre]) conteo[item.nombre] = 0;
+        conteo[item.nombre] += 1;
+      });
+    });
+
+    const ranking = Object.entries(conteo)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10);
+
+    if (ranking.length === 0) {
+      return <p className="text-neutral-500 text-sm">No hay datos todavía.</p>;
+    }
+
+    const maximo = ranking[0][1];
+
+    return (
+      <div className="space-y-3">
+        {ranking.map(([nombre, cantidad], i) => (
+          <div key={nombre}>
+            <div className="flex justify-between items-center mb-1">
+              <span className="text-sm text-white">
+                <span className="text-amber-400 mr-2">#{i + 1}</span>{nombre}
+              </span>
+              <span className="text-neutral-400 text-xs">{cantidad} {cantidad === 1 ? 'vez' : 'veces'}</span>
+            </div>
+            <div className="w-full bg-neutral-800 h-1">
+              <div
+                className="bg-amber-400 h-1 transition-all"
+                style={{ width: `${(cantidad / maximo) * 100}%` }}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  })()}
+</div>
         </div>
 
       </div>
