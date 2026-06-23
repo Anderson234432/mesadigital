@@ -132,6 +132,9 @@ useEffect(() => {
             className={`border p-4 ${mesa.estado === 'pendiente' ? 'border-amber-400' : 'border-neutral-700 opacity-50'}`}>
 
             <div className="flex justify-between items-center mb-3">
+              {mesa.rondas.some(r => r.nota?.includes('🔔')) && (
+  <p className="text-amber-400 text-sm font-bold mb-2">🔔 Esta mesa está llamando al mesero</p>
+)}
               <h2 className="text-lg font-bold">Mesa {mesa.mesa}</h2>
               <span className={`text-xs tracking-widest uppercase px-2 py-1 ${mesa.estado === 'pendiente' ? 'bg-amber-400 text-black' : 'bg-neutral-700 text-neutral-400'}`}>
                 {mesa.estado}

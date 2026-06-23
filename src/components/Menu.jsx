@@ -25,6 +25,7 @@ function Menu() {
   const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState('');
   const [estadoMesa, setEstadoMesa] = useState(null);
+  const [llamandoMesero, setLlamandoMesero] = useState(false);
   useEffect(() => {
     const cargarRestaurante = async () => {
       try {
@@ -149,6 +150,26 @@ useEffect(() => {
     }
   }
 
+  async function llamarMesero() {
+  if (llamandoMesero) return;
+  setLlamandoMesero(true);
+  try {
+    await addDoc(collection(db, 'restaurantes', restauranteId, 'pedidos'), {
+      mesa: numeroMesa,
+      items: [],
+      total: 0,
+      estado: 'pendiente',
+      tipo: 'llamada',
+      nota: '🔔 Mesa solicita atención',
+      creadoEn: serverTimestamp(),
+    });
+    setTimeout(() => setLlamandoMesero(false), 10000);
+  } catch (e) {
+    console.error('Error llamando mesero:', e);
+    setLlamandoMesero(false);
+  }
+}
+
   const categorias = [...new Set(platos.map((p) => p.categoria))];
 
   if (bienvenida) {
@@ -262,7 +283,18 @@ useEffect(() => {
           </div>
         </div>
       )}
-
+<div className="fixed bottom-0 left-0 right-0 pb-safe">
+  {carrito.length === 0 && (
+    <div className="bg-neutral-900 border-t border-neutral-800 px-4 py-3 flex justify-center">
+      <button
+        onClick={llamarMesero}
+        disabled={llamandoMesero}
+        className="border border-neutral-600 text-neutral-400 px-6 py-2 text-sm hover:border-amber-400 hover:text-amber-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+        {llamandoMesero ? '✓ Mesero notificado' : '🔔 Llamar al mesero'}
+      </button>
+    </div>
+  )}
+</div>
       {/* Carrito */}
       {carrito.length > 0 && (
         <div className="fixed bottom-0 left-0 right-0 bg-neutral-900 border-t border-neutral-800">
