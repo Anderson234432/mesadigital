@@ -1,13 +1,13 @@
 import { useState, useEffect, lazy, Suspense } from "react";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { onAuthStateChanged } from "firebase/auth";
-import { auth } from "./firebase";
+import { auth } from "../firebase";
 
-const Menu = lazy(() => import("./components/Menu"));
-const Admin = lazy(() => import("./components/Admin"));
-const Cocina = lazy(() => import("./components/Cocina"));
-const PanelMaestro = lazy(() => import("./components/PanelMaestro"));
-const Login = lazy(() => import("./components/Login"));
+const Menu = lazy(() => import("./Menu"));
+const Admin = lazy(() => import("./Admin"));
+const Cocina = lazy(() => import("./Cocina"));
+const PanelMaestro = lazy(() => import("./PanelMaestro"));
+const Login = lazy(() => import("./Login"));
 
 function App() {
   const [usuario, setUsuario] = useState(null);

@@ -228,7 +228,7 @@ function Menu() {
           <button
             onClick={() => setHistorialAbierto(!historialAbierto)}
             className="w-full text-xs text-neutral-500 hover:text-amber-400 transition-colors text-left">
-            {historialAbierto ? '▼' : '▶'} Ver lo que has pedido esta visita
+            {historialAbierto ? '▼' : '▶'} Ver mis pedidos
           </button>
           {historialAbierto && (
             <div className="border border-neutral-800 p-4 mt-2 mb-2 space-y-3">
