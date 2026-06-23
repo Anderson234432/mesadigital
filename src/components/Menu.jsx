@@ -24,7 +24,7 @@ function Menu() {
   const [mesasPendientes, setMesasPendientes] = useState(0);
   const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState('');
-
+  const [estadoMesa, setEstadoMesa] = useState(null);
   useEffect(() => {
     const cargarRestaurante = async () => {
       try {
@@ -68,7 +68,25 @@ function Menu() {
       console.error('Error guardando carrito:', e);
     }
   }, [carrito, restauranteId]);
+useEffect(() => {
+  const unsubEstado = onSnapshot(
+    collection(db, 'restaurantes', restauranteId, 'pedidos'),
+    (snapshot) => {
+      const pedidosMesa = snapshot.docs
+        .map(d => d.data())
+        .filter(p => p.mesa === numeroMesa && p.estado !== 'archivado');
 
+      if (pedidosMesa.length === 0) {
+        setEstadoMesa(null);
+      } else if (pedidosMesa.some(p => p.estado === 'pendiente')) {
+        setEstadoMesa('pendiente');
+      } else {
+        setEstadoMesa('listo');
+      }
+    }
+  );
+  return () => unsubEstado();
+}, [restauranteId, numeroMesa]);
   useEffect(() => {
     const timer = setTimeout(() => setBienvenida(false), 3000);
     return () => clearTimeout(timer);

@@ -9,6 +9,7 @@ import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { storage } from "../firebase";
 import { signOut } from 'firebase/auth';
 import { auth } from '../firebase';
+import imageCompression from 'browser-image-compression';
 
 export default function Admin() {
   const { restauranteId } = useParams();
@@ -74,16 +75,28 @@ export default function Admin() {
   const handleChange = (e) => setForm({ ...form, [e.target.name]: e.target.value });
 
   async function subirImagen() {
-    if (!imagen) return null;
-    if (imagen.size > 3 * 1024 * 1024) {
-      mostrarMensaje('La imagen supera los 3MB. Usa una imagen más pequeña.', 'error');
-      return 'ERROR';
-    }
-    const storageRef = ref(storage, `platos/${Date.now()}_${imagen.name}`);
-    await uploadBytes(storageRef, imagen);
-    return await getDownloadURL(storageRef);
+  if (!imagen) return null;
+  if (imagen.size > 10 * 1024 * 1024) {
+    mostrarMensaje('La imagen supera los 10MB.', 'error');
+    return 'ERROR';
   }
 
+  try {
+    const opciones = {
+      maxSizeMB: 0.5,
+      maxWidthOrHeight: 1024,
+      useWebWorker: true,
+    };
+    const imagenComprimida = await imageCompression(imagen, opciones);
+    const storageRef = ref(storage, `platos/${Date.now()}_${imagen.name}`);
+    await uploadBytes(storageRef, imagenComprimida);
+    return await getDownloadURL(storageRef);
+  } catch (e) {
+    console.error('Error subiendo imagen:', e);
+    mostrarMensaje('Error al subir la imagen.', 'error');
+    return 'ERROR';
+  }
+}
   const guardar = async () => {
     if (!form.nombre || !form.precio || !form.categoria) {
       mostrarMensaje('Nombre, precio y categoría son obligatorios.', 'error');
