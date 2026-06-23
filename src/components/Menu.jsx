@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { collection, onSnapshot, addDoc, serverTimestamp, getDoc, doc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useParams } from 'react-router-dom';
@@ -13,7 +13,6 @@ function Menu() {
   const [mesasPendientes, setMesasPendientes] = useState(0);
   const [estadoMesa, setEstadoMesa] = useState(null);
   const [pedidosMesa, setPedidosMesa] = useState([]);
-
   const [carrito, setCarrito] = useState(() => {
     try {
       const guardado = sessionStorage.getItem(`carrito_${restauranteId}`);
@@ -26,14 +25,19 @@ function Menu() {
   const [nota, setNota] = useState('');
   const [enviando, setEnviando] = useState(false);
   const [llamandoMesero, setLlamandoMesero] = useState(false);
-
   const [bienvenida, setBienvenida] = useState(true);
   const [categoriaActiva, setCategoriaActiva] = useState(null);
   const [historialAbierto, setHistorialAbierto] = useState(false);
   const [pedidoEnviado, setPedidoEnviado] = useState('');
   const [error, setError] = useState('');
+  const montadoRef = useRef(true);
 
   // ─── Carga inicial ────────────────────────────────────────
+  useEffect(() => {
+    montadoRef.current = true;
+    return () => { montadoRef.current = false; };
+  }, []);
+
   useEffect(() => {
     const cargarRestaurante = async () => {
       try {
@@ -54,24 +58,21 @@ function Menu() {
       (err) => console.error('Error en platos:', err)
     );
 
-    // Un solo listener para pedidos — maneja los 3 estados derivados
     const unsubPedidos = onSnapshot(
       collection(db, 'restaurantes', restauranteId, 'pedidos'),
       (snapshot) => {
         const todos = snapshot.docs.map(d => d.data());
 
-        // Mesas pendientes (para calcular tiempo estimado)
         const mesas = new Set(
           todos.filter(p => p.estado === 'pendiente').map(p => p.mesa)
         );
         setMesasPendientes(mesas.size);
 
-        // Estado del pedido de esta mesa
-        const deMiMesa = todos.filter(p => 
-  p.mesa === numeroMesa && 
-  p.estado !== 'archivado' && 
-  p.tipo !== 'llamada'
-);
+        const deMiMesa = todos.filter(p =>
+          p.mesa === numeroMesa &&
+          p.estado !== 'archivado' &&
+          p.tipo !== 'llamada'
+        );
         if (deMiMesa.length === 0) {
           setEstadoMesa(null);
         } else if (deMiMesa.some(p => p.estado === 'pendiente')) {
@@ -80,7 +81,6 @@ function Menu() {
           setEstadoMesa('listo');
         }
 
-        // Historial de pedidos de esta mesa (sin llamadas al mesero)
         setPedidosMesa(
           todos.filter(p => p.mesa === numeroMesa && p.tipo !== 'llamada' && p.estado !== 'archivado')
         );
@@ -133,6 +133,10 @@ function Menu() {
     setEnviando(true);
     setError('');
 
+    const timeout = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('TIMEOUT')), 15000)
+    );
+
     try {
       const tieneBebidas = carrito.some(p => p.categoria?.toLowerCase() === 'bebidas');
       const tieneComida = carrito.some(p => p.categoria?.toLowerCase() !== 'bebidas');
@@ -145,26 +149,33 @@ function Menu() {
       if (tieneBebidas) mensaje += `🥤 Tu bebida tardará aprox ${tiempoBebida} min. `;
       if (tieneComida) mensaje += `🍽️ Tu comida tardará aprox ${tiempoComida} min.`;
 
-      await addDoc(collection(db, 'restaurantes', restauranteId, 'pedidos'), {
-        mesa: numeroMesa,
-        items: carrito.map((p) => ({ nombre: p.nombre, precio: p.precio, tiempoMin: p.tiempoMin || 0 })),
-        total,
-        estado: 'pendiente',
-        nota,
-        creadoEn: serverTimestamp(),
-      });
+      await Promise.race([
+        addDoc(collection(db, 'restaurantes', restauranteId, 'pedidos'), {
+          mesa: numeroMesa,
+          items: carrito.map((p) => ({ nombre: p.nombre, precio: p.precio, tiempoMin: p.tiempoMin || 0 })),
+          total,
+          estado: 'pendiente',
+          nota,
+          creadoEn: serverTimestamp(),
+        }),
+        timeout
+      ]);
 
+      if (!montadoRef.current) return;
       setCarrito([]);
       setNota('');
       sessionStorage.removeItem(`carrito_${restauranteId}`);
       setPedidoEnviado(mensaje || '¡Pedido enviado!');
-      setTimeout(() => setPedidoEnviado(''), 5000);
+      setTimeout(() => { if (montadoRef.current) setPedidoEnviado(''); }, 5000);
     } catch (e) {
-      console.error('Error enviando pedido:', e);
-      setError('Error al enviar el pedido. Intenta de nuevo.');
-      setTimeout(() => setError(''), 4000);
+      if (!montadoRef.current) return;
+      const msg = e.message === 'TIMEOUT'
+        ? 'Conexión lenta. Espera unos segundos antes de intentar de nuevo.'
+        : 'Error al enviar el pedido. Intenta de nuevo.';
+      setError(msg);
+      setTimeout(() => { if (montadoRef.current) setError(''); }, 6000);
     } finally {
-      setEnviando(false);
+      if (montadoRef.current) setEnviando(false);
     }
   }
 
@@ -355,7 +366,7 @@ function Menu() {
         </div>
       )}
 
-      {/* Botón llamar al mesero — solo cuando carrito vacío */}
+      {/* Botón llamar al mesero */}
       {carrito.length === 0 && (
         <div className="fixed bottom-0 left-0 right-0 bg-neutral-900 border-t border-neutral-800 px-4 py-3 flex justify-center">
           <button
