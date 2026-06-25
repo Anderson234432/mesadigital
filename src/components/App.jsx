@@ -9,6 +9,8 @@ const Cocina = lazy(() => import("./Cocina"));
 const PanelMaestro = lazy(() => import("./PanelMaestro"));
 const Login = lazy(() => import("./Login"));
 
+const MAESTRO_UID = "xB7aybhKvYhIkuq7TERTuMfUkaH2";
+
 function App() {
   const [usuario, setUsuario] = useState(null);
   const [cargando, setCargando] = useState(true);
@@ -30,7 +32,9 @@ function App() {
           <Route path="/restaurante/:restauranteId/menu/:numeroMesa" element={<Menu />} />
           <Route path="/restaurante/:restauranteId/admin" element={usuario ? <Admin /> : <Login />} />
           <Route path="/restaurante/:restauranteId/cocina" element={usuario ? <Cocina /> : <Login />} />
-          <Route path="/maestro" element={usuario ? <PanelMaestro /> : <Login />} />
+          <Route path="/maestro" element={
+            !usuario ? <Login /> : usuario.uid === MAESTRO_UID ? <PanelMaestro /> : <Login />
+          } />
         </Routes>
       </Suspense>
     </BrowserRouter>

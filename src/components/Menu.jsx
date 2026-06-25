@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { collection, onSnapshot, addDoc, serverTimestamp, getDoc, doc, query, where } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, serverTimestamp, getDoc, getDocs, doc, query, where,  } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useParams } from 'react-router-dom';
 
@@ -111,6 +111,43 @@ const unsubConteo = onSnapshot(
     }
   }, [carrito, restauranteId]);
 
+// ─── Reconectar al volver a la pestaña (móvil) ───────────
+useEffect(() => {
+  const handleVisibilidad = async () => {
+    if (document.visibilityState !== 'visible') return;
+    try {
+      const snap = await getDocs(
+        query(
+          collection(db, 'restaurantes', restauranteId, 'pedidos'),
+          where('mesa', '==', numeroMesa),
+          where('estado', '!=', 'archivado')
+        )
+      );
+      const todos = snap.docs.map(d => d.data()).filter(p => p.tipo !== 'llamada');
+      if (todos.length === 0) setEstadoMesa(null);
+      else if (todos.some(p => p.estado === 'pendiente')) setEstadoMesa('pendiente');
+      else setEstadoMesa('listo');
+    } catch (e) {
+      console.error('Error reconectando:', e);
+    }
+  };
+
+  document.addEventListener('visibilitychange', handleVisibilidad);
+  return () => document.removeEventListener('visibilitychange', handleVisibilidad);
+}, [restauranteId, numeroMesa]);
+
+// ─── Mantener conexión activa en móvil ────────────────────
+useEffect(() => {
+  const intervalo = setInterval(async () => {
+    try {
+      await disableNetwork(db);
+      await enableNetwork(db);
+    } catch (e) {}
+  }, 30000);
+
+  return () => clearInterval(intervalo);
+}, []);
+
   // ─── Pantalla de bienvenida ───────────────────────────────
   useEffect(() => {
     const timer = setTimeout(() => setBienvenida(false), 3000);
@@ -174,6 +211,7 @@ const unsubConteo = onSnapshot(
       setNota('');
       sessionStorage.removeItem(`carrito_${restauranteId}`);
       setPedidoEnviado(mensaje || '¡Pedido enviado!');
+      setEstadoMesa('pendiente');
       setTimeout(() => { if (montadoRef.current) setPedidoEnviado(''); }, 5000);
     } catch (e) {
       if (!montadoRef.current) return;
@@ -238,9 +276,9 @@ const unsubConteo = onSnapshot(
 
       {/* Barra de estado del pedido */}
       {estadoMesa && (
-        <div className={`w-full py-3 text-center text-sm font-bold tracking-widest uppercase ${
-          estadoMesa === 'listo' ? 'bg-green-500 text-white' : 'bg-amber-400 text-black'
-        }`}>
+  <div className={`sticky top-0 z-40 w-full py-3 text-center text-sm font-bold tracking-widest uppercase ${
+    estadoMesa === 'listo' ? 'bg-green-500 text-white animate-pulse' : 'bg-amber-400 text-black'
+  }`}>
           {estadoMesa === 'listo' ? '✓ Tu pedido está listo' : '🍳 Tu pedido está siendo preparado'}
         </div>
       )}
