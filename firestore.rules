@@ -1,0 +1,48 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /restaurantes/{restauranteId} {
+      // Public read: customers need restaurant name and config
+      allow read: if true;
+      // Only authenticated users (admin/master) can modify restaurants
+      allow create, update, delete: if request.auth != null;
+
+      match /platos/{platoId} {
+        // Public read: customers browse the menu
+        allow read: if true;
+        // Only authenticated users (admin) can manage dishes
+        allow write: if request.auth != null;
+      }
+
+      match /pedidos/{pedidoId} {
+        // Public read: customers check their order status
+        allow read: if true;
+
+        // Public create: customers place orders without auth.
+        // Validate structure to prevent abuse.
+        allow create: if
+          // Required fields must be present
+          request.resource.data.keys().hasAll(['mesa', 'items', 'total', 'estado', 'creadoEn']) &&
+          // New orders must start as pendiente (can't create a listo/archivado order)
+          request.resource.data.estado == 'pendiente' &&
+          // Mesa: non-empty string, max 20 chars
+          request.resource.data.mesa is string &&
+          request.resource.data.mesa.size() > 0 &&
+          request.resource.data.mesa.size() <= 20 &&
+          // Total: non-negative number
+          request.resource.data.total is number &&
+          request.resource.data.total >= 0 &&
+          // Items: list, max 50 entries
+          request.resource.data.items is list &&
+          request.resource.data.items.size() <= 50 &&
+          // Nota: optional string, max 500 chars
+          request.resource.data.get('nota', '') is string &&
+          request.resource.data.get('nota', '').size() <= 500;
+
+        // Only authenticated users (cocina/admin) can change order state or archive
+        allow update, delete: if request.auth != null;
+      }
+    }
+  }
+}

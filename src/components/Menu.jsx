@@ -1,12 +1,29 @@
 import { useState, useEffect, useRef } from 'react';
-import { collection, onSnapshot, addDoc, serverTimestamp, getDoc, getDocs, doc, query, where,  } from 'firebase/firestore';
+import {
+  collection, onSnapshot, addDoc, serverTimestamp,
+  getDoc, doc, query, where, Timestamp,
+} from 'firebase/firestore';
 import { db } from '../firebase';
 import { useParams } from 'react-router-dom';
 
 function Menu() {
   const { restauranteId, numeroMesa } = useParams();
 
-  // ─── Estado ───────────────────────────────────────────────
+  // Session isolation: persist session start across refreshes within same tab.
+  // sessionStorage is per-tab and clears when the tab closes — new customer = new session.
+  const sessionStart = useRef(null);
+  if (sessionStart.current === null) {
+    const key = `ss_${restauranteId}_${numeroMesa}`;
+    const stored = sessionStorage.getItem(key);
+    if (stored) {
+      sessionStart.current = Timestamp.fromMillis(Number(stored));
+    } else {
+      const now = Timestamp.now();
+      sessionStorage.setItem(key, String(now.toMillis()));
+      sessionStart.current = now;
+    }
+  }
+
   const [restaurante, setRestaurante] = useState(null);
   const [platos, setPlatos] = useState([]);
   const [tiemposRestaurante, setTiemposRestaurante] = useState({});
@@ -15,7 +32,7 @@ function Menu() {
   const [pedidosMesa, setPedidosMesa] = useState([]);
   const [carrito, setCarrito] = useState(() => {
     try {
-      const guardado = sessionStorage.getItem(`carrito_${restauranteId}`);
+      const guardado = sessionStorage.getItem(`carrito_${restauranteId}_${numeroMesa}`);
       return guardado ? JSON.parse(guardado) : [];
     } catch {
       return [];
@@ -25,14 +42,15 @@ function Menu() {
   const [nota, setNota] = useState('');
   const [enviando, setEnviando] = useState(false);
   const [llamandoMesero, setLlamandoMesero] = useState(false);
-  const [bienvenida, setBienvenida] = useState(true);
   const [categoriaActiva, setCategoriaActiva] = useState(null);
   const [historialAbierto, setHistorialAbierto] = useState(false);
   const [pedidoEnviado, setPedidoEnviado] = useState('');
   const [error, setError] = useState('');
-  const montadoRef = useRef(true);
 
-  // ─── Carga inicial ────────────────────────────────────────
+  const montadoRef = useRef(true);
+  const subsRef = useRef({});
+  const resubscribeRef = useRef(null);
+
   useEffect(() => {
     montadoRef.current = true;
     return () => { montadoRef.current = false; };
@@ -54,109 +72,100 @@ function Menu() {
 
     const unsubPlatos = onSnapshot(
       collection(db, 'restaurantes', restauranteId, 'platos'),
-      (snapshot) => setPlatos(snapshot.docs.map((d) => ({ id: d.id, ...d.data() }))),
+      (snapshot) => {
+        if (!montadoRef.current) return;
+        setPlatos(snapshot.docs.map((d) => ({ id: d.id, ...d.data() })));
+      },
       (err) => console.error('Error en platos:', err)
     );
 
-    // 2. Solo pedidos de ESTA mesa — estado e historial
-const unsubMiMesa = onSnapshot(
-  query(
-    collection(db, 'restaurantes', restauranteId, 'pedidos'),
-    where('mesa', '==', numeroMesa),
-    where('estado', '!=', 'archivado')
-  ),
-  (snapshot) => {
-    const todos = snapshot.docs.map(d => d.data());
-    const conPedidos = todos.filter(p => p.tipo !== 'llamada');
+    function procesarPedidos(snapshot) {
+      if (!montadoRef.current) return;
+      const sessionMs = sessionStart.current.toMillis();
+      const todos = snapshot.docs
+        .map(d => d.data())
+        .filter(p =>
+          p.estado !== 'archivado' &&
+          (p.creadoEn?.toMillis() ?? 0) >= sessionMs
+        );
+      const conPedidos = todos.filter(p => p.tipo !== 'llamada');
 
-    if (conPedidos.length === 0) {
-      setEstadoMesa(null);
-    } else if (conPedidos.some(p => p.estado === 'pendiente')) {
-      setEstadoMesa('pendiente');
-    } else {
-      setEstadoMesa('listo');
+      if (conPedidos.length === 0) setEstadoMesa(null);
+      else if (conPedidos.some(p => p.estado === 'pendiente')) setEstadoMesa('pendiente');
+      else setEstadoMesa('listo');
+
+      setPedidosMesa(conPedidos);
     }
 
-    setPedidosMesa(conPedidos);
-  },
-  (err) => console.error('Error en pedidos de mesa:', err)
-);
+    function subscribe() {
+      if (subsRef.current.miMesa) subsRef.current.miMesa();
+      if (subsRef.current.conteo) subsRef.current.conteo();
 
-// 3. Solo conteo de mesas pendientes — para tiempo estimado
-const unsubConteo = onSnapshot(
-  query(
-    collection(db, 'restaurantes', restauranteId, 'pedidos'),
-    where('estado', '==', 'pendiente')
-  ),
-  (snapshot) => {
-    const mesas = new Set(snapshot.docs.map(d => d.data().mesa));
-    setMesasPendientes(mesas.size);
-  },
-  (err) => console.error('Error en conteo:', err)
-);
+      subsRef.current.miMesa = onSnapshot(
+        query(
+          collection(db, 'restaurantes', restauranteId, 'pedidos'),
+          where('mesa', '==', numeroMesa)
+        ),
+        procesarPedidos,
+        (err) => {
+          console.error('Error en pedidos de mesa:', err);
+          if (montadoRef.current) setTimeout(subscribe, 3000);
+        }
+      );
+
+      subsRef.current.conteo = onSnapshot(
+        query(
+          collection(db, 'restaurantes', restauranteId, 'pedidos'),
+          where('estado', '==', 'pendiente')
+        ),
+        (snapshot) => {
+          if (!montadoRef.current) return;
+          const mesas = new Set(snapshot.docs.map(d => d.data().mesa));
+          setMesasPendientes(mesas.size);
+        },
+        (err) => {
+          console.error('Error en conteo:', err);
+          if (montadoRef.current) setTimeout(subscribe, 3000);
+        }
+      );
+    }
+
+    resubscribeRef.current = subscribe;
+    subscribe();
 
     return () => {
       unsubPlatos();
-      unsubMiMesa();
-      unsubConteo();
+      if (subsRef.current.miMesa) subsRef.current.miMesa();
+      if (subsRef.current.conteo) subsRef.current.conteo();
     };
   }, [restauranteId, numeroMesa]);
 
-  // ─── Persistir carrito ────────────────────────────────────
+  // Re-suscribir listeners al volver a la pestaña — crítico en móvil
+  useEffect(() => {
+    const handleVisibilidad = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (resubscribeRef.current) resubscribeRef.current();
+    };
+    document.addEventListener('visibilitychange', handleVisibilidad);
+    return () => document.removeEventListener('visibilitychange', handleVisibilidad);
+  }, []);
+
   useEffect(() => {
     try {
-      sessionStorage.setItem(`carrito_${restauranteId}`, JSON.stringify(carrito));
+      sessionStorage.setItem(`carrito_${restauranteId}_${numeroMesa}`, JSON.stringify(carrito));
     } catch (e) {
       console.error('Error guardando carrito:', e);
     }
-  }, [carrito, restauranteId]);
+  }, [carrito, restauranteId, numeroMesa]);
 
-// ─── Reconectar al volver a la pestaña (móvil) ───────────
-useEffect(() => {
-  const handleVisibilidad = async () => {
-    if (document.visibilityState !== 'visible') return;
-    try {
-      const snap = await getDocs(
-        query(
-          collection(db, 'restaurantes', restauranteId, 'pedidos'),
-          where('mesa', '==', numeroMesa),
-          where('estado', '!=', 'archivado')
-        )
-      );
-      const todos = snap.docs.map(d => d.data()).filter(p => p.tipo !== 'llamada');
-      if (todos.length === 0) setEstadoMesa(null);
-      else if (todos.some(p => p.estado === 'pendiente')) setEstadoMesa('pendiente');
-      else setEstadoMesa('listo');
-    } catch (e) {
-      console.error('Error reconectando:', e);
-    }
-  };
-
-  document.addEventListener('visibilitychange', handleVisibilidad);
-  return () => document.removeEventListener('visibilitychange', handleVisibilidad);
-}, [restauranteId, numeroMesa]);
-
-// ─── Mantener conexión activa en móvil ────────────────────
-useEffect(() => {
-  const intervalo = setInterval(async () => {
-    try {
-      await disableNetwork(db);
-      await enableNetwork(db);
-    } catch (e) {}
-  }, 30000);
-
-  return () => clearInterval(intervalo);
-}, []);
-
-  // ─── Pantalla de bienvenida ───────────────────────────────
-  useEffect(() => {
-    const timer = setTimeout(() => setBienvenida(false), 3000);
-    return () => clearTimeout(timer);
-  }, []);
-
-  // ─── Carrito helpers ──────────────────────────────────────
   function agregarAlCarrito(plato) {
-    setCarrito(prev => [...prev, plato]);
+    setCarrito(prev => [...prev, {
+      id: plato.id,
+      nombre: plato.nombre,
+      precio: plato.precio,
+      categoria: plato.categoria,
+      tiempoMin: plato.tiempoMin || 0,
+    }]);
   }
 
   const total = carrito.reduce((suma, item) => suma + item.precio, 0);
@@ -172,7 +181,6 @@ useEffect(() => {
     return acc;
   }, []);
 
-  // ─── Enviar pedido ────────────────────────────────────────
   async function enviarPedido() {
     if (enviando || carrito.length === 0) return;
     setEnviando(true);
@@ -200,16 +208,16 @@ useEffect(() => {
           items: carrito.map((p) => ({ nombre: p.nombre, precio: p.precio, tiempoMin: p.tiempoMin || 0 })),
           total,
           estado: 'pendiente',
-          nota,
+          nota: nota.slice(0, 500),
           creadoEn: serverTimestamp(),
         }),
-        timeout
+        timeout,
       ]);
 
       if (!montadoRef.current) return;
       setCarrito([]);
       setNota('');
-      sessionStorage.removeItem(`carrito_${restauranteId}`);
+      sessionStorage.removeItem(`carrito_${restauranteId}_${numeroMesa}`);
       setPedidoEnviado(mensaje || '¡Pedido enviado!');
       setEstadoMesa('pendiente');
       setTimeout(() => { if (montadoRef.current) setPedidoEnviado(''); }, 5000);
@@ -225,7 +233,6 @@ useEffect(() => {
     }
   }
 
-  // ─── Llamar al mesero ─────────────────────────────────────
   async function llamarMesero() {
     if (llamandoMesero) return;
     setLlamandoMesero(true);
@@ -239,29 +246,15 @@ useEffect(() => {
         nota: '🔔 Mesa solicita atención',
         creadoEn: serverTimestamp(),
       });
-      setTimeout(() => setLlamandoMesero(false), 10000);
+      setTimeout(() => { if (montadoRef.current) setLlamandoMesero(false); }, 10000);
     } catch (e) {
       console.error('Error llamando mesero:', e);
-      setLlamandoMesero(false);
+      if (montadoRef.current) setLlamandoMesero(false);
     }
   }
 
   const categorias = [...new Set(platos.map((p) => p.categoria))];
 
-  // ─── Pantalla de bienvenida ───────────────────────────────
-  if (bienvenida) {
-    return (
-      <div className="min-h-screen text-white font-serif flex flex-col items-center justify-center gap-4"
-        style={{ background: 'linear-gradient(to bottom, #1a0a00, #0a0a0a)' }}>
-        <p className="text-amber-400 text-xs tracking-widest uppercase">Bienvenido a</p>
-        <h1 className="text-4xl font-bold text-center px-6">{restaurante?.nombre || ''}</h1>
-        <div className="border-t border-neutral-700 w-12 mt-2" />
-        <p className="text-neutral-400 text-sm tracking-widest uppercase">Mesa {numeroMesa}</p>
-      </div>
-    );
-  }
-
-  // ─── Vista principal ──────────────────────────────────────
   return (
     <div className="min-h-screen bg-neutral-950 text-white font-serif">
 
@@ -276,9 +269,9 @@ useEffect(() => {
 
       {/* Barra de estado del pedido */}
       {estadoMesa && (
-  <div className={`sticky top-0 z-40 w-full py-3 text-center text-sm font-bold tracking-widest uppercase ${
-    estadoMesa === 'listo' ? 'bg-green-500 text-white animate-pulse' : 'bg-amber-400 text-black'
-  }`}>
+        <div className={`sticky top-0 z-40 w-full py-3 text-center text-sm font-bold tracking-widest uppercase ${
+          estadoMesa === 'listo' ? 'bg-green-500 text-white animate-pulse' : 'bg-amber-400 text-black'
+        }`}>
           {estadoMesa === 'listo' ? '✓ Tu pedido está listo' : '🍳 Tu pedido está siendo preparado'}
         </div>
       )}
@@ -445,15 +438,16 @@ useEffect(() => {
               </div>
               <textarea
                 value={nota}
-                onChange={(e) => setNota(e.target.value)}
+                onChange={(e) => setNota(e.target.value.slice(0, 500))}
                 placeholder="Nota para cocina (opcional)..."
                 rows={2}
+                maxLength={500}
                 className="w-full bg-neutral-800 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 text-sm focus:outline-none focus:border-amber-400 resize-none mb-3"
               />
               <div className="flex justify-between items-center border-t border-neutral-700 pt-3">
                 <button onClick={() => {
                   setCarrito([]);
-                  sessionStorage.removeItem(`carrito_${restauranteId}`);
+                  sessionStorage.removeItem(`carrito_${restauranteId}_${numeroMesa}`);
                 }} className="text-xs text-neutral-500 hover:text-red-400 transition-colors">
                   Cancelar
                 </button>

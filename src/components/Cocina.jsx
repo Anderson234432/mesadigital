@@ -10,7 +10,7 @@ function Cocina() {
 
   // ─── Estado ───────────────────────────────────────────────
   const [pedidos, setPedidos] = useState([]);
-  const [cantidadAnterior, setCantidadAnterior] = useState(null);
+  const cantidadAnteriorRef = useRef(null);
   const [ahora, setAhora] = useState(Date.now());
   const audioContextRef = useRef(null);
 
@@ -65,10 +65,10 @@ function Cocina() {
 
   // ─── Detectar nuevo pedido ────────────────────────────────
   useEffect(() => {
-    if (cantidadAnterior !== null && pedidos.length > cantidadAnterior) {
+    if (cantidadAnteriorRef.current !== null && pedidos.length > cantidadAnteriorRef.current) {
       reproducirSonido();
     }
-    setCantidadAnterior(pedidos.length);
+    cantidadAnteriorRef.current = pedidos.length;
   }, [pedidos]);
 
   // ─── Acciones ─────────────────────────────────────────────
