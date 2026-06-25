@@ -1,5 +1,5 @@
 import { initializeApp } from "firebase/app";
-import { getFirestore } from "firebase/firestore";
+import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
 import { getStorage } from "firebase/storage";
 
@@ -15,7 +15,12 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const secondaryApp = initializeApp(firebaseConfig, "Secondary");
 
-export const db = getFirestore(app);
+export const db = initializeFirestore(app, {
+  localCache: persistentLocalCache({
+    tabManager: persistentMultipleTabManager()
+  })
+});
+
 export const auth = getAuth(app);
 export const secondaryAuth = getAuth(secondaryApp);
 export const storage = getStorage(app);
