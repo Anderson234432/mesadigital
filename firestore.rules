@@ -3,7 +3,7 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     match /restaurantes/{restauranteId} {
-      // Public read: customers need restaurant name and config
+      // Public read: customers need restaurant name, tiempos, and stats.mesasPendientes
       allow read: if true;
       // Only authenticated users (admin/master) can modify restaurants
       allow create, update, delete: if request.auth != null;
@@ -16,32 +16,46 @@ service cloud.firestore {
       }
 
       match /pedidos/{pedidoId} {
-        // Public read: customers check their order status
-        allow read: if true;
+        // Staff (email-authenticated) can read all orders.
+        // Anonymous customers can only read their own orders via clienteUid.
+        // This enforces table isolation: Mesa 5 cannot read Mesa 3's orders.
+        allow read: if
+          request.auth != null && (
+            request.auth.token.email != null ||
+            resource.data.get('clienteUid', '') == request.auth.uid
+          );
 
-        // Public create: customers place orders without auth.
-        // Validate structure to prevent abuse.
+        // Customers (anonymous auth required) can create orders.
+        // The Cloud Function bypasses these rules via Admin SDK (recommended path).
+        // This rule is the fallback for direct writes when Cloud Functions are not deployed.
         allow create: if
-          // Required fields must be present
+          request.auth != null &&
+          // Required fields
           request.resource.data.keys().hasAll(['mesa', 'items', 'total', 'estado', 'creadoEn']) &&
-          // New orders must start as pendiente (can't create a listo/archivado order)
+          // New orders must start as pendiente
           request.resource.data.estado == 'pendiente' &&
           // Mesa: non-empty string, max 20 chars
           request.resource.data.mesa is string &&
           request.resource.data.mesa.size() > 0 &&
           request.resource.data.mesa.size() <= 20 &&
-          // Total: non-negative number
+          // Total: non-negative, capped at RD$100,000
           request.resource.data.total is number &&
           request.resource.data.total >= 0 &&
-          // Items: list, max 50 entries
+          request.resource.data.total <= 100000 &&
+          // Items: list, max 30 entries
           request.resource.data.items is list &&
-          request.resource.data.items.size() <= 50 &&
+          request.resource.data.items.size() <= 30 &&
+          // Non-empty orders must have a positive total
+          (request.resource.data.items.size() == 0 || request.resource.data.total > 0) &&
           // Nota: optional string, max 500 chars
           request.resource.data.get('nota', '') is string &&
           request.resource.data.get('nota', '').size() <= 500;
 
-        // Only authenticated users (cocina/admin) can change order state or archive
-        allow update, delete: if request.auth != null;
+        // Only authenticated staff (cocina/admin) can change order state or archive.
+        // Anonymous customers cannot modify or delete any order.
+        allow update, delete: if
+          request.auth != null &&
+          request.auth.token.email != null;
       }
     }
   }

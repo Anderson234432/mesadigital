@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
-import { collection, onSnapshot, updateDoc, doc, query, where, Timestamp } from 'firebase/firestore';
+import { collection, onSnapshot, query, where, Timestamp } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useParams } from 'react-router-dom';
 import { signOut } from 'firebase/auth';
 import { auth } from '../firebase';
+import { actualizarEstadoMesa } from '../services/pedidosService';
 
 function Cocina() {
   const { restauranteId } = useParams();
@@ -78,9 +79,7 @@ function Cocina() {
 
   async function marcarListoMesa(ids) {
     try {
-      await Promise.all(ids.map(id =>
-        updateDoc(doc(db, 'restaurantes', restauranteId, 'pedidos', id), { estado: 'listo' })
-      ));
+      await actualizarEstadoMesa(restauranteId, ids, 'listo');
     } catch (e) {
       console.error('Error marcando como listo:', e);
     }
@@ -88,9 +87,7 @@ function Cocina() {
 
   async function archivarMesa(ids) {
     try {
-      await Promise.all(ids.map(id =>
-        updateDoc(doc(db, 'restaurantes', restauranteId, 'pedidos', id), { estado: 'archivado' })
-      ));
+      await actualizarEstadoMesa(restauranteId, ids, 'archivado');
     } catch (e) {
       console.error('Error archivando mesa:', e);
     }
@@ -98,9 +95,7 @@ function Cocina() {
 
   async function descartarLlamada(llamadaIds) {
     try {
-      await Promise.all(llamadaIds.map(id =>
-        updateDoc(doc(db, 'restaurantes', restauranteId, 'pedidos', id), { estado: 'archivado' })
-      ));
+      await actualizarEstadoMesa(restauranteId, llamadaIds, 'archivado');
     } catch (e) {
       console.error('Error descartando llamada:', e);
     }
