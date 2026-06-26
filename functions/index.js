@@ -1,6 +1,8 @@
 const { onCall, HttpsError } = require('firebase-functions/v2/https');
+const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { initializeApp } = require('firebase-admin/app');
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
+const { getAuth } = require('firebase-admin/auth');
 
 initializeApp();
 const db = getFirestore();
@@ -114,3 +116,32 @@ exports.crearPedido = onCall({ region: 'us-central1' }, async (request) => {
 
   return { pedidoId: nuevoPedidoRef.id, total };
 });
+
+// ── Limpieza semanal de usuarios anónimos (>30 días sin actividad) ─────────
+exports.limpiarUsuariosAnonimos = onSchedule(
+  { schedule: 'every 168 hours', region: 'us-central1' },
+  async () => {
+    const auth = getAuth();
+    const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+    let pageToken;
+    let deleted = 0;
+
+    do {
+      const result = await auth.listUsers(1000, pageToken);
+      const uidsAEliminar = result.users
+        .filter((u) =>
+          u.providerData.length === 0 &&
+          new Date(u.metadata.creationTime).getTime() < cutoff
+        )
+        .map((u) => u.uid);
+
+      if (uidsAEliminar.length > 0) {
+        await auth.deleteUsers(uidsAEliminar);
+        deleted += uidsAEliminar.length;
+      }
+      pageToken = result.pageToken;
+    } while (pageToken);
+
+    console.log(`Usuarios anónimos eliminados: ${deleted}`);
+  }
+);

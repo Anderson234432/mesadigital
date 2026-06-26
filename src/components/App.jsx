@@ -1,6 +1,48 @@
-import { useState, useEffect, lazy, Suspense } from "react";
+import { Component, useState, useEffect, lazy, Suspense } from "react";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { suscribirEstadoAuth, esMaestro } from "../services/authService";
+
+class ErrorBoundary extends Component {
+  state = { crashed: false };
+  static getDerivedStateFromError() { return { crashed: true }; }
+  componentDidCatch(err, info) { console.error('ErrorBoundary:', err, info); }
+  render() {
+    if (this.state.crashed) return (
+      <div className="min-h-screen bg-neutral-950 text-white font-serif flex items-center justify-center">
+        <div className="text-center px-6">
+          <p className="text-red-400 text-xs tracking-widest uppercase mb-2">Error inesperado</p>
+          <h1 className="text-2xl font-bold mb-4">Algo salió mal</h1>
+          <p className="text-neutral-500 text-sm mb-6">Recarga la página para continuar.</p>
+          <button onClick={() => window.location.reload()}
+            className="text-xs border border-neutral-600 text-neutral-400 px-4 py-2 hover:border-amber-400 hover:text-amber-400 transition-colors">
+            Recargar
+          </button>
+        </div>
+      </div>
+    );
+    return this.props.children;
+  }
+}
+
+function OfflineBanner() {
+  const [online, setOnline] = useState(navigator.onLine);
+  useEffect(() => {
+    const handleOnline = () => setOnline(true);
+    const handleOffline = () => setOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+  if (online) return null;
+  return (
+    <div className="fixed top-0 left-0 right-0 z-50 bg-red-950 border-b border-red-800 text-red-300 text-xs text-center py-2 tracking-wide">
+      Sin conexión — tus pedidos no se enviarán hasta que vuelva la señal
+    </div>
+  );
+}
 
 const Menu = lazy(() => import("./Menu"));
 const Admin = lazy(() => import("./Admin"));
@@ -50,8 +92,10 @@ function App() {
 
   return (
     <BrowserRouter>
-      <Suspense fallback={<div className="min-h-screen bg-neutral-950" />}>
-        <Routes>
+      <ErrorBoundary>
+        <OfflineBanner />
+        <Suspense fallback={<div className="min-h-screen bg-neutral-950" />}>
+          <Routes>
           <Route path="/" element={<Landing />} />
           <Route path="/restaurante/:restauranteId/menu/:numeroMesa" element={<Menu />} />
           <Route path="/restaurante/:restauranteId/admin" element={usuario ? <Admin /> : <Login />} />
@@ -60,8 +104,9 @@ function App() {
             !usuario ? <Login /> : esMaestro() ? <PanelMaestro /> : <Login />
           } />
           <Route path="*" element={<NotFound />} />
-        </Routes>
-      </Suspense>
+          </Routes>
+        </Suspense>
+      </ErrorBoundary>
     </BrowserRouter>
   );
 }

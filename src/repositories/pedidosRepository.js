@@ -1,6 +1,6 @@
 import {
   collection, doc, query, where, Timestamp,
-  onSnapshot, writeBatch, increment,
+  onSnapshot, writeBatch, serverTimestamp, increment,
 } from 'firebase/firestore';
 import { db } from '../firebase';
 
@@ -44,6 +44,37 @@ export const subscribePedidosPorMesa = (restauranteId, numeroMesa, onChange, onE
     (snap) => onChange(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
     onError
   );
+
+export function crearLlamadaMesero(restauranteId, mesa, clienteUid) {
+  const batch = writeBatch(db);
+  const ref = doc(collection(db, 'restaurantes', restauranteId, 'pedidos'));
+  batch.set(ref, {
+    mesa,
+    items: [],
+    total: 0,
+    estado: 'pendiente',
+    tipo: 'llamada',
+    nota: '🔔 Mesa solicita atención',
+    creadoEn: serverTimestamp(),
+    clienteUid: clienteUid || null,
+  });
+  return batch.commit();
+}
+
+export function crearPedidoDirecto(restauranteId, { mesa, carrito, total, nota, clienteUid }) {
+  const batch = writeBatch(db);
+  const ref = doc(collection(db, 'restaurantes', restauranteId, 'pedidos'));
+  batch.set(ref, {
+    mesa,
+    items: carrito.map((p) => ({ nombre: p.nombre, precio: p.precio, tiempoMin: p.tiempoMin || 0 })),
+    total,
+    estado: 'pendiente',
+    nota: nota.slice(0, 500),
+    creadoEn: serverTimestamp(),
+    clienteUid: clienteUid || null,
+  });
+  return batch.commit();
+}
 
 export function actualizarEstadoPedidos(restauranteId, ids, estado) {
   const batch = writeBatch(db);

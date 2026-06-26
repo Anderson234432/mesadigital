@@ -1,7 +1,5 @@
-import { collection, doc, writeBatch, serverTimestamp } from 'firebase/firestore';
 import { getApps } from 'firebase/app';
 import { getFunctions, httpsCallable } from 'firebase/functions';
-import { db } from '../firebase';
 import * as pedidosRepo from '../repositories/pedidosRepository';
 
 // ─── Retry logic ──────────────────────────────────────────
@@ -52,18 +50,7 @@ export function enviarPedido(restauranteId, { mesa, carrito, total, nota, client
         cfCode.includes('internal');
       if (!notDeployed) throw cfErr;
 
-      const pedidoRef = doc(collection(db, 'restaurantes', restauranteId, 'pedidos'));
-      const batch = writeBatch(db);
-      batch.set(pedidoRef, {
-        mesa,
-        items: carrito.map((p) => ({ nombre: p.nombre, precio: p.precio, tiempoMin: p.tiempoMin || 0 })),
-        total,
-        estado: 'pendiente',
-        nota: nota.slice(0, 500),
-        creadoEn: serverTimestamp(),
-        clienteUid: clienteUid || null,
-      });
-      return batch.commit();
+      return pedidosRepo.crearPedidoDirecto(restauranteId, { mesa, carrito, total, nota, clienteUid });
     }
   }
 
@@ -72,21 +59,7 @@ export function enviarPedido(restauranteId, { mesa, carrito, total, nota, client
 
 // ─── Llamada al mesero ────────────────────────────────────
 export function llamarMesero(restauranteId, mesa, clienteUid) {
-  return withBackoff(() => {
-    const batch = writeBatch(db);
-    const ref = doc(collection(db, 'restaurantes', restauranteId, 'pedidos'));
-    batch.set(ref, {
-      mesa,
-      items: [],
-      total: 0,
-      estado: 'pendiente',
-      tipo: 'llamada',
-      nota: '🔔 Mesa solicita atención',
-      creadoEn: serverTimestamp(),
-      clienteUid: clienteUid || null,
-    });
-    return batch.commit();
-  });
+  return withBackoff(() => pedidosRepo.crearLlamadaMesero(restauranteId, mesa, clienteUid));
 }
 
 // ─── Estado de mesas ──────────────────────────────────────
