@@ -15,6 +15,7 @@ function Cocina() {
   const audioContextRef = useRef(null);
   const unsubPedidosRef = useRef(null);
   const resubscribeRef = useRef(null);
+  const retryTimerRef = useRef(null);
   const montadoRef = useRef(true);
 
   useEffect(() => {
@@ -71,14 +72,17 @@ function Cocina() {
       unsubPedidosRef.current = subscribePedidosHoy(
         restauranteId,
         (todos) => { if (montadoRef.current) setPedidos(todos.filter((p) => p.estado !== 'archivado')); },
-        (err) => { console.error('Error pedidos cocina:', err); if (montadoRef.current) setTimeout(subscribe, 3000); }
+        (err) => { console.error('Error pedidos cocina:', err); if (montadoRef.current) retryTimerRef.current = setTimeout(subscribe, 3000); }
       );
     }
 
     resubscribeRef.current = subscribe;
     subscribe();
 
-    return () => { if (unsubPedidosRef.current) unsubPedidosRef.current(); };
+    return () => {
+      clearTimeout(retryTimerRef.current);
+      if (unsubPedidosRef.current) unsubPedidosRef.current();
+    };
   }, [restauranteId, acceso]);
 
   // ─── Re-suscribir al volver a la pestaña (crítico en móvil) ──

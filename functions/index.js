@@ -119,7 +119,7 @@ exports.crearPedido = onCall({ region: 'us-central1' }, async (request) => {
 
 // ── Limpieza semanal de usuarios anónimos (>30 días sin actividad) ─────────
 exports.limpiarUsuariosAnonimos = onSchedule(
-  { schedule: 'every 168 hours', region: 'us-central1' },
+  { schedule: 'every 168 hours', region: 'us-central1', timeoutSeconds: 540 },
   async () => {
     const auth = getAuth();
     const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
@@ -127,8 +127,8 @@ exports.limpiarUsuariosAnonimos = onSchedule(
     let deleted = 0;
 
     do {
-      const result = await auth.listUsers(1000, pageToken);
-      const uidsAEliminar = result.users
+      const listResult = await auth.listUsers(1000, pageToken);
+      const uidsAEliminar = listResult.users
         .filter((u) =>
           u.providerData.length === 0 &&
           new Date(u.metadata.lastSignInTime).getTime() < cutoff
@@ -136,10 +136,15 @@ exports.limpiarUsuariosAnonimos = onSchedule(
         .map((u) => u.uid);
 
       if (uidsAEliminar.length > 0) {
-        await auth.deleteUsers(uidsAEliminar);
-        deleted += uidsAEliminar.length;
+        const deleteResult = await auth.deleteUsers(uidsAEliminar);
+        deleted += deleteResult.successCount;
+        if (deleteResult.failureCount > 0) {
+          deleteResult.errors.forEach((e) =>
+            console.error(`Error borrando uid en posición ${e.index}:`, e.error.message)
+          );
+        }
       }
-      pageToken = result.pageToken;
+      pageToken = listResult.pageToken;
     } while (pageToken);
 
     console.log(`Usuarios anónimos eliminados: ${deleted}`);

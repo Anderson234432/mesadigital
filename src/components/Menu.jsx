@@ -100,6 +100,7 @@ function Menu() {
   const montadoRef = useRef(true);
   const subsRef = useRef({});
   const resubscribeRef = useRef(null);
+  const retryTimerRef = useRef(null);
   const envioRef = useRef(false);
 
   useEffect(() => {
@@ -202,7 +203,7 @@ function Menu() {
 
       const onError = (err) => {
         console.error('Error en pedidos de mesa:', err);
-        if (montadoRef.current) setTimeout(subscribe, 3000);
+        if (montadoRef.current) retryTimerRef.current = setTimeout(subscribe, 3000);
       };
 
       subsRef.current.miMesa = clienteUidRef.current
@@ -214,6 +215,7 @@ function Menu() {
     subscribe();
 
     return () => {
+      clearTimeout(retryTimerRef.current);
       unsubRestaurante();
       unsubPlatos();
       if (subsRef.current.miMesa) subsRef.current.miMesa();
