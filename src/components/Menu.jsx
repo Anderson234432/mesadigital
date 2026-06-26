@@ -93,6 +93,7 @@ function Menu() {
   const [enviando, setEnviando] = useState(false);
   const [llamandoMesero, setLlamandoMesero] = useState(false);
   const [categoriaActiva, setCategoriaActiva] = useState(null);
+  const [busqueda, setBusqueda] = useState('');
   const [historialAbierto, setHistorialAbierto] = useState(false);
   const [pedidoEnviado, setPedidoEnviado] = useState('');
   const [error, setError] = useState('');
@@ -148,6 +149,17 @@ function Menu() {
       .sort((a, b) => (a.orden ?? 999) - (b.orden ?? 999)),
     [platos, categoriaActiva]
   );
+
+  const resultadosBusqueda = useMemo(() => {
+    const q = busqueda.trim().toLowerCase();
+    if (!q) return [];
+    return platos
+      .filter((p) => p.disponible !== false && (
+        p.nombre?.toLowerCase().includes(q) ||
+        p.categoria?.toLowerCase().includes(q)
+      ))
+      .sort((a, b) => (a.orden ?? 999) - (b.orden ?? 999));
+  }, [platos, busqueda]);
 
   // ─── Callbacks estables para PlatoItem ───────────────────
   const agregarAlCarrito = useCallback((plato) => {
@@ -363,9 +375,48 @@ function Menu() {
         </div>
       )}
 
-      {/* Categorías o lista de platos */}
-      {!categoriaActiva ? (
-        <div className="max-w-lg mx-auto px-4 py-8 space-y-3">
+      {/* Buscador */}
+      <div className="max-w-lg mx-auto px-4 pt-6 pb-2">
+        <div className="relative">
+          <input
+            type="search"
+            value={busqueda}
+            onChange={(e) => { setBusqueda(e.target.value); setCategoriaActiva(null); }}
+            placeholder="Buscar por nombre o categoría..."
+            className="w-full bg-neutral-900 border border-neutral-700 px-4 py-3 text-white placeholder-neutral-500 text-base focus:outline-none focus:border-amber-400"
+          />
+          {busqueda && (
+            <button
+              onClick={() => setBusqueda('')}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-white text-lg leading-none">
+              ×
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Resultados de búsqueda / Categorías / Lista de platos */}
+      {busqueda.trim() ? (
+        <div className="max-w-lg mx-auto px-4 py-4 space-y-4">
+          {resultadosBusqueda.length === 0 ? (
+            <p className="text-neutral-500 text-sm text-center py-8">Sin resultados para "{busqueda}"</p>
+          ) : (
+            resultadosBusqueda.map((plato) => {
+              const cantidad = carritoAgrupado.find((i) => i.id === plato.id)?.cantidad ?? 0;
+              return (
+                <PlatoItem
+                  key={plato.id}
+                  plato={plato}
+                  cantidad={cantidad}
+                  onAgregar={agregarAlCarrito}
+                  onQuitar={quitarDelCarrito}
+                />
+              );
+            })
+          )}
+        </div>
+      ) : !categoriaActiva ? (
+        <div className="max-w-lg mx-auto px-4 py-4 space-y-3">
           {categorias.map((cat) => (
             <button key={cat} onClick={() => setCategoriaActiva(cat)}
               className="w-full border border-neutral-700 py-4 text-left px-6 text-lg font-semibold hover:border-amber-400 hover:text-amber-400 transition-colors capitalize">
