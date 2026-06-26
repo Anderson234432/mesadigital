@@ -1,6 +1,5 @@
-import { getApps } from 'firebase/app';
-import { getFunctions, httpsCallable } from 'firebase/functions';
 import * as pedidosRepo from '../repositories/pedidosRepository';
+import { getCrearPedidoFn } from '../repositories/functionsRepository';
 
 // ─── Retry logic ──────────────────────────────────────────
 const RETRYABLE = ['unavailable', 'deadline-exceeded', 'resource-exhausted'];
@@ -19,15 +18,6 @@ async function withBackoff(fn) {
     }
   }
   throw lastErr;
-}
-
-// ─── Cloud Function (lazy init) ───────────────────────────
-let _crearPedidoFn = null;
-function getCrearPedidoFn() {
-  if (!_crearPedidoFn) {
-    _crearPedidoFn = httpsCallable(getFunctions(getApps()[0]), 'crearPedido');
-  }
-  return _crearPedidoFn;
 }
 
 // ─── Envío de pedido (Cloud Function + fallback directo) ──

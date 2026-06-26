@@ -1,5 +1,10 @@
 import { initializeApp } from "firebase/app";
-import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from "firebase/firestore";
+import {
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+  memoryLocalCache,
+} from "firebase/firestore";
 import { getAuth } from "firebase/auth";
 import { getStorage } from "firebase/storage";
 
@@ -14,11 +19,15 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 
-export const db = initializeFirestore(app, {
-  localCache: persistentLocalCache({
-    tabManager: persistentMultipleTabManager(),
-  }),
-});
+function buildCache() {
+  try {
+    return persistentLocalCache({ tabManager: persistentMultipleTabManager() });
+  } catch {
+    // Safari modo privado y entornos sin IndexedDB
+    return memoryLocalCache();
+  }
+}
 
+export const db = initializeFirestore(app, { localCache: buildCache() });
 export const auth = getAuth(app);
 export const storage = getStorage(app);

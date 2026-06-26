@@ -5,21 +5,36 @@ function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [cargando, setCargando] = useState(false);
+  const [recuperado, setRecuperado] = useState(false);
 
   async function handleLogin(e) {
     e.preventDefault();
+    if (cargando) return;
+    setCargando(true);
+    setError('');
     try {
       await login(email, password);
     } catch {
       setError('Correo o contraseña incorrectos');
+    } finally {
+      setCargando(false);
     }
   }
 
   async function handleRecuperar() {
     if (!email) { setError('Escribe tu correo primero'); return; }
-    await recuperarPassword(email);
+    if (cargando) return;
+    setCargando(true);
     setError('');
-    alert('Correo de recuperación enviado');
+    try {
+      await recuperarPassword(email);
+      setRecuperado(true);
+    } catch {
+      setError('No se pudo enviar el correo. Verifica la dirección.');
+    } finally {
+      setCargando(false);
+    }
   }
 
   return (
@@ -27,31 +42,44 @@ function Login() {
       <div className="border border-neutral-800 p-8 w-full max-w-sm">
         <p className="text-amber-400 text-xs tracking-widest uppercase mb-1">MesaDigital</p>
         <h1 className="text-2xl font-bold mb-6">Acceso</h1>
-        <form onSubmit={handleLogin} className="space-y-4">
-          <input
-            type="email"
-            placeholder="Correo"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400"
-          />
-          <input
-            type="password"
-            placeholder="Contraseña"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400"
-          />
-          {error && <p className="text-red-400 text-sm">{error}</p>}
-          <button type="submit"
-            className="w-full bg-amber-400 text-black py-2 font-bold hover:bg-amber-300 transition-colors">
-            Entrar
-          </button>
-          <button type="button" onClick={handleRecuperar}
-            className="w-full text-neutral-500 text-sm hover:text-amber-400 transition-colors mt-2">
-            ¿Olvidaste tu contraseña?
-          </button>
-        </form>
+
+        {recuperado ? (
+          <div className="text-center space-y-4">
+            <p className="text-green-400 text-sm">Correo de recuperación enviado. Revisa tu bandeja.</p>
+            <button onClick={() => setRecuperado(false)}
+              className="text-neutral-500 text-sm hover:text-amber-400 transition-colors">
+              Volver al login
+            </button>
+          </div>
+        ) : (
+          <form onSubmit={handleLogin} className="space-y-4">
+            <input
+              type="email"
+              placeholder="Correo"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              autoComplete="email"
+              className="w-full bg-neutral-900 border border-neutral-700 px-3 py-3 text-base text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400"
+            />
+            <input
+              type="password"
+              placeholder="Contraseña"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="current-password"
+              className="w-full bg-neutral-900 border border-neutral-700 px-3 py-3 text-base text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400"
+            />
+            {error && <p className="text-red-400 text-sm">{error}</p>}
+            <button type="submit" disabled={cargando}
+              className="w-full bg-amber-400 text-black py-3 font-bold hover:bg-amber-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+              {cargando ? 'Entrando...' : 'Entrar'}
+            </button>
+            <button type="button" onClick={handleRecuperar} disabled={cargando}
+              className="w-full text-neutral-500 text-sm hover:text-amber-400 transition-colors py-2 disabled:opacity-50">
+              ¿Olvidaste tu contraseña?
+            </button>
+          </form>
+        )}
       </div>
     </div>
   );

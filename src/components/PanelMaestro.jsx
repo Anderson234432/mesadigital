@@ -95,7 +95,7 @@ function PanelMaestro() {
               value={nombre}
               onChange={(e) => setNombre(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleCrear()}
-              className="flex-1 bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400"
+              className="flex-1 bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-base"
             />
             <button onClick={handleCrear}
               className="bg-amber-400 text-black px-6 py-2 font-bold hover:bg-amber-300 transition-colors">

@@ -131,7 +131,7 @@ exports.limpiarUsuariosAnonimos = onSchedule(
       const uidsAEliminar = result.users
         .filter((u) =>
           u.providerData.length === 0 &&
-          new Date(u.metadata.creationTime).getTime() < cutoff
+          new Date(u.metadata.lastSignInTime).getTime() < cutoff
         )
         .map((u) => u.uid);
 
