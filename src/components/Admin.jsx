@@ -49,9 +49,19 @@ export default function Admin() {
 
   const esHoy = fechaFiltro === localDateStr();
 
-  const totalDia = useMemo(
-    () => pedidos.filter((p) => p.tipo !== 'llamada').reduce((sum, p) => sum + (p.total || 0), 0),
+  const pedidosReales = useMemo(
+    () => pedidos.filter((p) => p.tipo !== 'llamada'),
     [pedidos]
+  );
+
+  const totalDia = useMemo(
+    () => pedidosReales.reduce((sum, p) => sum + (p.total || 0), 0),
+    [pedidosReales]
+  );
+
+  const ticketPromedio = useMemo(
+    () => pedidosReales.length > 0 ? Math.round(totalDia / pedidosReales.length) : 0,
+    [totalDia, pedidosReales]
   );
 
   const mesasActivas = useMemo(() => {
@@ -104,10 +114,9 @@ export default function Admin() {
     pdf.line(15, nombreRestaurante ? 40 : 32, 195, nombreRestaurante ? 40 : 32);
 
     pdf.setFontSize(13);
-    const pedidosReales = pedidos.filter((p) => p.tipo !== 'llamada');
     const yBase = nombreRestaurante ? 50 : 42;
     pdf.text(`Total del día: RD$${totalDia}`, 15, yBase);
-    pdf.text(`Pedidos: ${pedidosReales.length}`, 15, yBase + 8);
+    pdf.text(`Pedidos: ${pedidosReales.length}  |  Promedio: RD$${ticketPromedio}`, 15, yBase + 8);
     pdf.line(15, yBase + 13, 195, yBase + 13);
 
     const conteo = {};
@@ -500,20 +509,26 @@ export default function Admin() {
             {fechaSeleccionada.toLocaleDateString('es-DO', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
           </p>
 
-          <div className="border border-neutral-700 p-4 mb-6">
-            <p className="text-neutral-400 text-xs tracking-widest uppercase">Total del día</p>
-            <p className="text-3xl font-bold text-amber-400 mt-1">RD${totalDia}</p>
-            <p className="text-neutral-500 text-xs mt-1">
-              {pedidos.filter((p) => p.tipo !== 'llamada').length} pedido(s)
-            </p>
+          <div className="grid grid-cols-3 gap-3 mb-6">
+            <div className="border border-neutral-700 p-4">
+              <p className="text-neutral-400 text-xs tracking-widest uppercase">Total</p>
+              <p className="text-2xl font-bold text-amber-400 mt-1">RD${totalDia}</p>
+            </div>
+            <div className="border border-neutral-700 p-4">
+              <p className="text-neutral-400 text-xs tracking-widest uppercase">Pedidos</p>
+              <p className="text-2xl font-bold text-amber-400 mt-1">{pedidosReales.length}</p>
+            </div>
+            <div className="border border-neutral-700 p-4">
+              <p className="text-neutral-400 text-xs tracking-widest uppercase">Promedio</p>
+              <p className="text-2xl font-bold text-amber-400 mt-1">RD${ticketPromedio}</p>
+            </div>
           </div>
 
           <div className="space-y-4">
-            {pedidos.filter((p) => p.tipo !== 'llamada').length === 0 && (
+            {pedidosReales.length === 0 && (
               <p className="text-neutral-500 text-sm">No hay pedidos para esta fecha.</p>
             )}
-            {[...pedidos]
-              .filter((p) => p.tipo !== 'llamada')
+            {[...pedidosReales]
               .sort((a, b) => (b.creadoEn?.toMillis() || 0) - (a.creadoEn?.toMillis() || 0))
               .map((p) => (
                 <div key={p.id} className="border-b border-neutral-800 pb-4">
@@ -556,7 +571,7 @@ export default function Admin() {
             </p>
             {(() => {
               const conteo = {};
-              pedidos.filter((p) => p.tipo !== 'llamada').forEach((p) => {
+              pedidosReales.forEach((p) => {
                 (p.items || []).forEach((item) => {
                   if (!conteo[item.nombre]) conteo[item.nombre] = 0;
                   conteo[item.nombre] += 1;
