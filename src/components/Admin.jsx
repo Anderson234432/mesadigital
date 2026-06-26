@@ -370,7 +370,7 @@ export default function Admin() {
             placeholder="Buscar nombre o categoría…"
             value={busqueda}
             onChange={(e) => setBusqueda(e.target.value)}
-            className="bg-neutral-900 border border-neutral-700 px-3 py-1 text-white placeholder-neutral-500 text-xs focus:outline-none focus:border-amber-400 w-44"
+            className="bg-neutral-900 border border-neutral-700 px-3 py-1 text-white placeholder-neutral-500 text-base focus:outline-none focus:border-amber-400 w-44"
           />
         </div>
         <div className="space-y-3">
@@ -502,7 +502,7 @@ export default function Admin() {
               value={fechaFiltro}
               max={localDateStr()}
               onChange={(e) => { if (e.target.value) setFechaFiltro(e.target.value); }}
-              className="bg-neutral-900 border border-neutral-700 px-3 py-2 text-white focus:outline-none focus:border-amber-400 text-sm"
+              className="bg-neutral-900 border border-neutral-700 px-3 py-2 text-white focus:outline-none focus:border-amber-400 text-base"
             />
           </div>
           <p className="text-neutral-500 text-xs mb-6">

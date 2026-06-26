@@ -118,7 +118,7 @@ function PanelMaestro() {
                     onChange={(e) => setNombreEditar(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && guardarEdicion(r.id)}
                     autoFocus
-                    className="flex-1 bg-neutral-900 border border-amber-400 px-3 py-1 text-white text-sm focus:outline-none"
+                    className="flex-1 bg-neutral-900 border border-amber-400 px-3 py-1 text-white text-base focus:outline-none"
                   />
                   <button onClick={() => guardarEdicion(r.id)}
                     className="text-xs bg-amber-400 text-black px-3 py-1 font-bold">
@@ -194,7 +194,7 @@ function PanelMaestro() {
                         value={getNuevoUid(r.id, 'admin')}
                         onChange={(e) => setNuevoUidCampo(r.id, 'admin', e.target.value)}
                         onKeyDown={(e) => e.key === 'Enter' && handleAgregarUid(r.id, 'adminUids', getNuevoUid(r.id, 'admin'))}
-                        className="flex-1 bg-neutral-900 border border-neutral-700 px-2 py-1 text-white text-xs placeholder-neutral-600 focus:outline-none focus:border-amber-400 font-mono"
+                        className="flex-1 bg-neutral-900 border border-neutral-700 px-2 py-1 text-white text-base placeholder-neutral-600 focus:outline-none focus:border-amber-400 font-mono"
                       />
                       <button onClick={() => handleAgregarUid(r.id, 'adminUids', getNuevoUid(r.id, 'admin'))}
                         className="text-xs bg-amber-400 text-black px-3 py-1 font-bold hover:bg-amber-300">
@@ -223,7 +223,7 @@ function PanelMaestro() {
                         value={getNuevoUid(r.id, 'cocina')}
                         onChange={(e) => setNuevoUidCampo(r.id, 'cocina', e.target.value)}
                         onKeyDown={(e) => e.key === 'Enter' && handleAgregarUid(r.id, 'cocinaUids', getNuevoUid(r.id, 'cocina'))}
-                        className="flex-1 bg-neutral-900 border border-neutral-700 px-2 py-1 text-white text-xs placeholder-neutral-600 focus:outline-none focus:border-amber-400 font-mono"
+                        className="flex-1 bg-neutral-900 border border-neutral-700 px-2 py-1 text-white text-base placeholder-neutral-600 focus:outline-none focus:border-amber-400 font-mono"
                       />
                       <button onClick={() => handleAgregarUid(r.id, 'cocinaUids', getNuevoUid(r.id, 'cocina'))}
                         className="text-xs bg-amber-400 text-black px-3 py-1 font-bold hover:bg-amber-300">
@@ -241,7 +241,7 @@ function PanelMaestro() {
                   type="number"
                   min="1"
                   placeholder="Número de mesas"
-                  className="bg-neutral-900 border border-neutral-700 px-3 py-1 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400 w-40 text-sm"
+                  className="bg-neutral-900 border border-neutral-700 px-3 py-1 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400 w-40 text-base"
                   onChange={(e) => {
                     const valor = Number(e.target.value);
                     if (valor >= 1) setMesasPor({ ...mesasPor, [r.id]: valor });

@@ -33,18 +33,18 @@ const PlatoItem = memo(function PlatoItem({ plato, cantidad, onAgregar, onQuitar
           {cantidad > 0 ? (
             <>
               <button onClick={() => onQuitar(plato.id)}
-                className="border border-neutral-600 text-white w-7 h-7 flex items-center justify-center hover:border-red-400 hover:text-red-400 transition-colors">
+                className="border border-neutral-600 text-white w-11 h-11 flex items-center justify-center hover:border-red-400 hover:text-red-400 transition-colors">
                 −
               </button>
               <span className="text-white w-4 text-center">{cantidad}</span>
               <button onClick={() => onAgregar(plato)}
-                className="border border-amber-400 text-amber-400 w-7 h-7 flex items-center justify-center hover:bg-amber-400 hover:text-black transition-colors">
+                className="border border-amber-400 text-amber-400 w-11 h-11 flex items-center justify-center hover:bg-amber-400 hover:text-black transition-colors">
                 +
               </button>
             </>
           ) : (
             <button onClick={() => onAgregar(plato)}
-              className="border border-amber-400 text-amber-400 px-3 py-1 text-sm hover:bg-amber-400 hover:text-black transition-colors">
+              className="border border-amber-400 text-amber-400 px-4 py-3 text-sm hover:bg-amber-400 hover:text-black transition-colors min-h-[44px]">
               + Agregar
             </button>
           )}
@@ -423,7 +423,7 @@ function Menu() {
       {carrito.length === 0 && (
         <div className="fixed bottom-0 left-0 right-0 bg-neutral-900 border-t border-neutral-800 px-4 py-3 flex justify-center">
           <button onClick={llamarMesero} disabled={llamandoMesero}
-            className="border border-neutral-600 text-neutral-400 px-6 py-2 text-sm hover:border-amber-400 hover:text-amber-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+            className="border border-neutral-600 text-neutral-400 px-6 py-3 text-sm hover:border-amber-400 hover:text-amber-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed min-h-[44px]">
             {llamandoMesero ? '✓ Mesero notificado' : '🔔 Llamar al mesero'}
           </button>
         </div>
@@ -454,7 +454,7 @@ function Menu() {
                 placeholder="Nota para cocina (opcional)..."
                 rows={2}
                 maxLength={500}
-                className="w-full bg-neutral-800 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 text-sm focus:outline-none focus:border-amber-400 resize-none mb-3"
+                className="w-full bg-neutral-800 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 text-base focus:outline-none focus:border-amber-400 resize-none mb-3"
               />
               <div className="flex justify-between items-center border-t border-neutral-700 pt-3">
                 <button onClick={() => {
@@ -464,7 +464,7 @@ function Menu() {
                   Cancelar
                 </button>
                 <button onClick={enviarPedido} disabled={enviando}
-                  className="bg-amber-400 text-black px-6 py-2 font-bold hover:bg-amber-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                  className="bg-amber-400 text-black px-6 py-3 font-bold hover:bg-amber-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed min-h-[44px]">
                   {enviando ? 'Enviando...' : 'Enviar pedido'}
                 </button>
               </div>

@@ -215,7 +215,7 @@ function Cocina() {
               <div className="flex justify-between items-center mb-3 px-3 py-2 border border-amber-400 border-opacity-30 bg-amber-400 bg-opacity-5">
                 <p className="text-amber-400 text-sm font-bold">🔔 Mesa solicita atención</p>
                 <button onClick={() => descartarLlamada(mesa.llamadaIds)}
-                  className="text-xs border border-neutral-600 text-neutral-400 px-3 py-1 hover:border-green-400 hover:text-green-400 transition-colors">
+                  className="text-xs border border-neutral-600 text-neutral-400 px-3 py-2 hover:border-green-400 hover:text-green-400 transition-colors min-h-[44px]">
                   ✓ Atendido
                 </button>
               </div>
@@ -279,13 +279,13 @@ function Cocina() {
             {/* Botones */}
             {mesa.estado === 'pendiente' && mesa.rondas.length > 0 && (
               <button onClick={() => marcarListoMesa(mesa.ids)}
-                className="mt-3 border border-amber-400 text-amber-400 px-4 py-1 text-sm hover:bg-amber-400 hover:text-black transition-colors">
+                className="mt-3 border border-amber-400 text-amber-400 px-4 py-3 text-sm hover:bg-amber-400 hover:text-black transition-colors min-h-[44px] w-full">
                 Marcar mesa como lista
               </button>
             )}
             {mesa.estado === 'listo' && (
               <button onClick={() => archivarMesa(mesa.ids)}
-                className="mt-3 border border-neutral-600 text-neutral-400 px-4 py-1 text-sm hover:border-red-400 hover:text-red-400 transition-colors">
+                className="mt-3 border border-neutral-600 text-neutral-400 px-4 py-3 text-sm hover:border-red-400 hover:text-red-400 transition-colors min-h-[44px] w-full">
                 Archivar mesa
               </button>
             )}
