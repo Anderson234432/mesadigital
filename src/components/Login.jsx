@@ -15,8 +15,17 @@ function Login() {
     setError('');
     try {
       await login(email, password);
-    } catch {
-      setError('Correo o contraseña incorrectos');
+    } catch (e) {
+      const code = e?.code || '';
+      if (code === 'auth/unauthorized-domain') {
+        setError('Dominio no autorizado en Firebase. Agrega mesadigital-pi.vercel.app en Authentication → Settings → Authorized domains.');
+      } else if (code === 'auth/too-many-requests') {
+        setError('Demasiados intentos. Espera unos minutos o restablece tu contraseña.');
+      } else if (code === 'auth/user-not-found' || code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
+        setError('Correo o contraseña incorrectos.');
+      } else {
+        setError(`Error: ${code || e?.message || 'desconocido'}`);
+      }
     } finally {
       setCargando(false);
     }
