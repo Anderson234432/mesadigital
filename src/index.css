@@ -4,8 +4,14 @@
 #print-area { display: block; }
 
 @media print {
-    .no-print { display: none !important; }
+  .no-print { display: none !important; }
   body * { visibility: hidden; }
   #print-area, #print-area * { visibility: visible; }
-    #print-area { position: fixed; top: 0; left: 0; width: 100%; text-align: center; }
+  #print-area {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+  }
 }

@@ -4,23 +4,21 @@ import { getAuth } from "firebase/auth";
 import { getStorage } from "firebase/storage";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyCZ8qGDsZNrijAkQVWvXtGRWelFc8FPkyM",
-  authDomain: "mesadigital-d9b90.firebaseapp.com",
-  projectId: "mesadigital-d9b90",
-  storageBucket: "mesadigital-d9b90.firebasestorage.app",
-  messagingSenderId: "66825226425",
-  appId: "1:66825226425:web:5299f7098c2f4ffc58f368"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
 };
 
 const app = initializeApp(firebaseConfig);
-const secondaryApp = initializeApp(firebaseConfig, "Secondary");
 
 export const db = initializeFirestore(app, {
   localCache: persistentLocalCache({
-    tabManager: persistentMultipleTabManager()
-  })
+    tabManager: persistentMultipleTabManager(),
+  }),
 });
 
 export const auth = getAuth(app);
-export const secondaryAuth = getAuth(secondaryApp);
 export const storage = getStorage(app);

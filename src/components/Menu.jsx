@@ -1,17 +1,17 @@
 import { useState, useEffect, useRef, useMemo, useCallback, memo } from 'react';
-import {
-  collection, onSnapshot, doc, query, where, Timestamp,
-} from 'firebase/firestore';
-import { db, auth } from '../firebase';
 import { useParams } from 'react-router-dom';
-import { signInAnonymously } from 'firebase/auth';
+import { loginAnonimo } from '../services/authService';
+import { subscribeRestaurante } from '../services/restaurantesService';
+import { subscribePlatos } from '../services/platosService';
 import {
   enviarPedido as enviarPedidoService,
   llamarMesero as llamarMeseroService,
+  subscribePedidosPorUid,
+  subscribePedidosPorMesa,
+  parsearErrorPedido,
 } from '../services/pedidosService';
 
-// Memoized plato card — only re-renders when its own props change,
-// preventing full-list repaint on every carrito mutation.
+// Memoized plato card — only re-renders when its own props change
 const PlatoItem = memo(function PlatoItem({ plato, cantidad, onAgregar, onQuitar }) {
   return (
     <div className="border-b border-neutral-800 pb-4">
@@ -32,21 +32,18 @@ const PlatoItem = memo(function PlatoItem({ plato, cantidad, onAgregar, onQuitar
         <div className="flex items-center gap-2 ml-4">
           {cantidad > 0 ? (
             <>
-              <button
-                onClick={() => onQuitar(plato.id)}
+              <button onClick={() => onQuitar(plato.id)}
                 className="border border-neutral-600 text-white w-7 h-7 flex items-center justify-center hover:border-red-400 hover:text-red-400 transition-colors">
                 −
               </button>
               <span className="text-white w-4 text-center">{cantidad}</span>
-              <button
-                onClick={() => onAgregar(plato)}
+              <button onClick={() => onAgregar(plato)}
                 className="border border-amber-400 text-amber-400 w-7 h-7 flex items-center justify-center hover:bg-amber-400 hover:text-black transition-colors">
                 +
               </button>
             </>
           ) : (
-            <button
-              onClick={() => onAgregar(plato)}
+            <button onClick={() => onAgregar(plato)}
               className="border border-amber-400 text-amber-400 px-3 py-1 text-sm hover:bg-amber-400 hover:text-black transition-colors">
               + Agregar
             </button>
@@ -66,17 +63,14 @@ function Menu() {
     const key = `ss_${restauranteId}_${numeroMesa}`;
     const stored = sessionStorage.getItem(key);
     if (stored) {
-      sessionStart.current = Timestamp.fromMillis(Number(stored));
+      sessionStart.current = Number(stored);
     } else {
-      const now = Timestamp.now();
-      sessionStorage.setItem(key, String(now.toMillis()));
+      const now = Date.now();
+      sessionStorage.setItem(key, String(now));
       sessionStart.current = now;
     }
   }
 
-  // Anonymous auth: each customer session gets a stable UID for mesa isolation.
-  // If auth fails (e.g., anonymous auth not enabled), the app degrades gracefully
-  // to the old mesa-based query — functionality is preserved, isolation is reduced.
   const [authReady, setAuthReady] = useState(false);
   const clienteUidRef = useRef(null);
 
@@ -106,8 +100,6 @@ function Menu() {
   const montadoRef = useRef(true);
   const subsRef = useRef({});
   const resubscribeRef = useRef(null);
-  // Synchronous flood guard — set before any await so rapid taps in the same
-  // event loop tick are rejected even before React re-renders.
   const envioRef = useRef(false);
 
   useEffect(() => {
@@ -115,22 +107,20 @@ function Menu() {
     return () => { montadoRef.current = false; };
   }, []);
 
-  // Step 1: anonymous auth before subscribing to Firestore.
+  // Autenticación anónima
   useEffect(() => {
-    signInAnonymously(auth)
-      .then(cred => {
+    loginAnonimo()
+      .then((cred) => {
         clienteUidRef.current = cred.user.uid;
         if (montadoRef.current) setAuthReady(true);
       })
-      .catch(e => {
-        // Degrade gracefully: no mesa isolation but orders still work.
+      .catch((e) => {
         console.warn('Auth anónima no disponible, continuando sin UID:', e.code);
         if (montadoRef.current) setAuthReady(true);
       });
   }, []);
 
-  // ─── Memoized derived state ─────────────────────────────────────────────────
-
+  // ─── Estado derivado ──────────────────────────────────────
   const total = useMemo(
     () => carrito.reduce((suma, item) => suma + item.precio, 0),
     [carrito]
@@ -138,7 +128,7 @@ function Menu() {
 
   const carritoAgrupado = useMemo(
     () => carrito.reduce((acc, item) => {
-      const existe = acc.find(i => i.id === item.id);
+      const existe = acc.find((i) => i.id === item.id);
       if (existe) { existe.cantidad += 1; existe.subtotal += item.precio; }
       else acc.push({ ...item, cantidad: 1, subtotal: item.precio });
       return acc;
@@ -147,30 +137,28 @@ function Menu() {
   );
 
   const categorias = useMemo(
-    () => [...new Set(platos.map(p => p.categoria))],
+    () => [...new Set(platos.map((p) => p.categoria))].sort(),
     [platos]
   );
 
   const platosFiltrados = useMemo(
-    () => platos.filter(p => p.categoria === categoriaActiva && p.disponible !== false),
+    () => platos
+      .filter((p) => p.categoria === categoriaActiva && p.disponible !== false)
+      .sort((a, b) => (a.orden ?? 999) - (b.orden ?? 999)),
     [platos, categoriaActiva]
   );
 
-  // ─── Stable callbacks for PlatoItem memo ───────────────────────────────────
-
+  // ─── Callbacks estables para PlatoItem ───────────────────
   const agregarAlCarrito = useCallback((plato) => {
-    setCarrito(prev => [...prev, {
-      id: plato.id,
-      nombre: plato.nombre,
-      precio: plato.precio,
-      categoria: plato.categoria,
-      tiempoMin: plato.tiempoMin || 0,
+    setCarrito((prev) => [...prev, {
+      id: plato.id, nombre: plato.nombre, precio: plato.precio,
+      categoria: plato.categoria, tiempoMin: plato.tiempoMin || 0,
     }]);
   }, []);
 
   const quitarDelCarrito = useCallback((platoId) => {
-    setCarrito(prev => {
-      const idx = [...prev].map(i => i.id).lastIndexOf(platoId);
+    setCarrito((prev) => {
+      const idx = [...prev].map((i) => i.id).lastIndexOf(platoId);
       if (idx === -1) return prev;
       const n = [...prev];
       n.splice(idx, 1);
@@ -178,47 +166,32 @@ function Menu() {
     });
   }, []);
 
-  // ─── Firebase subscriptions (after auth is ready) ──────────────────────────
-
+  // ─── Subscripciones Firebase ─────────────────────────────
   useEffect(() => {
     if (!authReady) return;
 
-    // Restaurant doc — includes stats.mesasPendientes (single small document,
-    // replaces the old global pending-orders query that ran on every client).
-    const unsubRestaurante = onSnapshot(
-      doc(db, 'restaurantes', restauranteId),
-      (snap) => {
-        if (!montadoRef.current || !snap.exists()) return;
-        const data = snap.data();
-        setRestaurante(data);
-        setTiemposRestaurante(data.tiempos || {});
-        setMesasPendientes(Math.max(0, data.stats?.mesasPendientes || 0));
-      },
-      (err) => console.error('Error cargando restaurante:', err)
-    );
-
-    const unsubPlatos = onSnapshot(
-      collection(db, 'restaurantes', restauranteId, 'platos'),
-      (snapshot) => {
-        if (!montadoRef.current) return;
-        setPlatos(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
-      },
-      (err) => console.error('Error en platos:', err)
-    );
-
-    function procesarPedidos(snapshot) {
+    const unsubRestaurante = subscribeRestaurante(restauranteId, (data) => {
       if (!montadoRef.current) return;
-      const sessionMs = sessionStart.current.toMillis();
-      const todos = snapshot.docs
-        .map(d => d.data())
-        .filter(p =>
-          p.estado !== 'archivado' &&
-          (p.creadoEn?.toMillis() ?? 0) >= sessionMs
-        );
-      const conPedidos = todos.filter(p => p.tipo !== 'llamada');
+      setRestaurante(data);
+      setTiemposRestaurante(data.tiempos || {});
+      setMesasPendientes(Math.max(0, data.stats?.mesasPendientes || 0));
+    });
+
+    const unsubPlatos = subscribePlatos(restauranteId, (datos) => {
+      if (!montadoRef.current) return;
+      setPlatos(datos);
+    });
+
+    function procesarPedidos(datos) {
+      if (!montadoRef.current) return;
+      const sessionMs = sessionStart.current;
+      const todos = datos.filter(
+        (p) => p.estado !== 'archivado' && (p.creadoEn?.toMillis() ?? 0) >= sessionMs
+      );
+      const conPedidos = todos.filter((p) => p.tipo !== 'llamada');
 
       if (conPedidos.length === 0) setEstadoMesa(null);
-      else if (conPedidos.some(p => p.estado === 'pendiente')) setEstadoMesa('pendiente');
+      else if (conPedidos.some((p) => p.estado === 'pendiente')) setEstadoMesa('pendiente');
       else setEstadoMesa('listo');
 
       setPedidosMesa(conPedidos);
@@ -227,26 +200,14 @@ function Menu() {
     function subscribe() {
       if (subsRef.current.miMesa) subsRef.current.miMesa();
 
-      // If the customer is authenticated anonymously, query by their UID for isolation.
-      // If auth failed (degraded mode), fall back to mesa-based query.
-      const pedidosQuery = clienteUidRef.current
-        ? query(
-            collection(db, 'restaurantes', restauranteId, 'pedidos'),
-            where('clienteUid', '==', clienteUidRef.current)
-          )
-        : query(
-            collection(db, 'restaurantes', restauranteId, 'pedidos'),
-            where('mesa', '==', numeroMesa)
-          );
+      const onError = (err) => {
+        console.error('Error en pedidos de mesa:', err);
+        if (montadoRef.current) setTimeout(subscribe, 3000);
+      };
 
-      subsRef.current.miMesa = onSnapshot(
-        pedidosQuery,
-        procesarPedidos,
-        (err) => {
-          console.error('Error en pedidos de mesa:', err);
-          if (montadoRef.current) setTimeout(subscribe, 3000);
-        }
-      );
+      subsRef.current.miMesa = clienteUidRef.current
+        ? subscribePedidosPorUid(restauranteId, clienteUidRef.current, procesarPedidos, onError)
+        : subscribePedidosPorMesa(restauranteId, numeroMesa, procesarPedidos, onError);
     }
 
     resubscribeRef.current = subscribe;
@@ -259,7 +220,7 @@ function Menu() {
     };
   }, [authReady, restauranteId, numeroMesa]);
 
-  // Re-subscribe on visibility change — critical for mobile tab switching.
+  // Re-suscribir al volver a la pestaña (crítico en móvil)
   useEffect(() => {
     const handle = () => {
       if (document.visibilityState !== 'visible') return;
@@ -269,6 +230,7 @@ function Menu() {
     return () => document.removeEventListener('visibilitychange', handle);
   }, []);
 
+  // Persistir carrito en sessionStorage
   useEffect(() => {
     try {
       sessionStorage.setItem(`carrito_${restauranteId}_${numeroMesa}`, JSON.stringify(carrito));
@@ -277,27 +239,24 @@ function Menu() {
     }
   }, [carrito, restauranteId, numeroMesa]);
 
-  // ─── Order submission ───────────────────────────────────────────────────────
-
+  // ─── Envío de pedido ──────────────────────────────────────
   const enviarPedido = useCallback(async () => {
     if (envioRef.current || carrito.length === 0) return;
     envioRef.current = true;
     setEnviando(true);
     setError('');
 
-    // Compute time estimate before clearing cart
-    const tieneBebidas = carrito.some(p => p.categoria?.toLowerCase() === 'bebidas');
-    const tieneComida = carrito.some(p => p.categoria?.toLowerCase() !== 'bebidas');
+    const tieneBebidas = carrito.some((p) => p.categoria?.toLowerCase() === 'bebidas');
+    const tieneComida = carrito.some((p) => p.categoria?.toLowerCase() !== 'bebidas');
     const tiempoBebida = tiemposRestaurante.bebidas || 5;
     const tiempoComida = tieneComida
-      ? Math.max(...carrito.filter(p => p.categoria?.toLowerCase() !== 'bebidas').map(p => p.tiempoMin || 15)) * (mesasPendientes + 1)
+      ? Math.max(...carrito.filter((p) => p.categoria?.toLowerCase() !== 'bebidas').map((p) => p.tiempoMin || 15)) * (mesasPendientes + 1)
       : null;
     let mensajeExito = '';
     if (tieneBebidas) mensajeExito += `🥤 Tu bebida tardará aprox ${tiempoBebida} min. `;
     if (tieneComida) mensajeExito += `🍽️ Tu comida tardará aprox ${tiempoComida} min.`;
 
-    // Optimistic UI: clear cart and mark as pending immediately.
-    // On failure the snapshot is restored (rollback).
+    // Optimistic UI — rollback en fallo
     const carritoSnapshot = [...carrito];
     const notaSnapshot = nota;
     const totalSnapshot = total;
@@ -308,10 +267,8 @@ function Menu() {
 
     try {
       await enviarPedidoService(restauranteId, {
-        mesa: numeroMesa,
-        carrito: carritoSnapshot,
-        total: totalSnapshot,
-        nota: notaSnapshot,
+        mesa: numeroMesa, carrito: carritoSnapshot,
+        total: totalSnapshot, nota: notaSnapshot,
         clienteUid: clienteUidRef.current,
       });
       if (!montadoRef.current) return;
@@ -319,14 +276,10 @@ function Menu() {
       setTimeout(() => { if (montadoRef.current) setPedidoEnviado(''); }, 5000);
     } catch (e) {
       if (!montadoRef.current) return;
-      // Rollback optimistic state
       setCarrito(carritoSnapshot);
       setNota(notaSnapshot);
       setEstadoMesa(null);
-      const msg = e?.message?.includes('disponible')
-        ? e.message
-        : 'Error al enviar el pedido. Intenta de nuevo.';
-      setError(msg);
+      setError(parsearErrorPedido(e));
       setTimeout(() => { if (montadoRef.current) setError(''); }, 6000);
     } finally {
       if (montadoRef.current) setEnviando(false);
@@ -346,11 +299,9 @@ function Menu() {
     }
   }, [llamandoMesero, restauranteId, numeroMesa]);
 
-  // Show blank screen while auth initializes (usually < 500ms).
   if (!authReady) return <div className="min-h-screen bg-neutral-950" />;
 
-  // ─── View ───────────────────────────────────────────────────────────────────
-
+  // ─── Vista ────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-neutral-950 text-white font-serif">
 
@@ -375,8 +326,7 @@ function Menu() {
       {/* Historial de visita */}
       {pedidosMesa.length > 0 && (
         <div className="max-w-lg mx-auto px-4 pt-4">
-          <button
-            onClick={() => setHistorialAbierto(!historialAbierto)}
+          <button onClick={() => setHistorialAbierto(!historialAbierto)}
             className="w-full text-xs text-neutral-500 hover:text-amber-400 transition-colors text-left">
             {historialAbierto ? '▼' : '▶'} Ver mis pedidos
           </button>
@@ -434,7 +384,7 @@ function Menu() {
           </div>
           <div className="space-y-4">
             {platosFiltrados.map((plato) => {
-              const cantidad = carritoAgrupado.find(i => i.id === plato.id)?.cantidad ?? 0;
+              const cantidad = carritoAgrupado.find((i) => i.id === plato.id)?.cantidad ?? 0;
               return (
                 <PlatoItem
                   key={plato.id}
@@ -470,9 +420,7 @@ function Menu() {
       {/* Botón llamar al mesero */}
       {carrito.length === 0 && (
         <div className="fixed bottom-0 left-0 right-0 bg-neutral-900 border-t border-neutral-800 px-4 py-3 flex justify-center">
-          <button
-            onClick={llamarMesero}
-            disabled={llamandoMesero}
+          <button onClick={llamarMesero} disabled={llamandoMesero}
             className="border border-neutral-600 text-neutral-400 px-6 py-2 text-sm hover:border-amber-400 hover:text-amber-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
             {llamandoMesero ? '✓ Mesero notificado' : '🔔 Llamar al mesero'}
           </button>
@@ -513,9 +461,7 @@ function Menu() {
                 }} className="text-xs text-neutral-500 hover:text-red-400 transition-colors">
                   Cancelar
                 </button>
-                <button
-                  onClick={enviarPedido}
-                  disabled={enviando}
+                <button onClick={enviarPedido} disabled={enviando}
                   className="bg-amber-400 text-black px-6 py-2 font-bold hover:bg-amber-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
                   {enviando ? 'Enviando...' : 'Enviar pedido'}
                 </button>

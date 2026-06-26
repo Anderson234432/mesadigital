@@ -1,24 +1,31 @@
-import { useState, useEffect } from "react";
-import { db } from "../firebase";
-import {
-  collection, addDoc, updateDoc, deleteDoc,
-  doc, onSnapshot, getDoc, query, where, Timestamp,
-} from "firebase/firestore";
+import { useState, useEffect, useMemo } from "react";
 import { useParams } from 'react-router-dom';
-import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
-import { storage } from "../firebase";
-import { signOut } from 'firebase/auth';
-import { auth } from '../firebase';
-import imageCompression from 'browser-image-compression';
 import jsPDF from 'jspdf';
+import { verificarAccesoAdmin, guardarTiempos } from '../services/restaurantesService';
+import { subscribePlatos, guardarPlato, eliminarPlato, toggleDisponible } from '../services/platosService';
+import { subscribePedidosDia, actualizarEstadoMesa } from '../services/pedidosService';
+import { logout, getUid } from '../services/authService';
+
+function localDateStr(date = new Date()) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
 
 export default function Admin() {
   const { restauranteId } = useParams();
+
+  // ─── Estado ───────────────────────────────────────────────
+  const [acceso, setAcceso] = useState(null);
+  const [nombreRestaurante, setNombreRestaurante] = useState('');
   const [platos, setPlatos] = useState([]);
   const [pedidos, setPedidos] = useState([]);
+  const [fechaFiltro, setFechaFiltro] = useState(localDateStr);
+  const [busqueda, setBusqueda] = useState('');
   const [form, setForm] = useState({
-    nombre: "", precio: "", categoria: "",
-    descripcion: "", imagenUrl: "", disponible: true, tiempoMin: "",
+    nombre: '', precio: '', categoria: '',
+    descripcion: '', imagenUrl: '', disponible: true, tiempoMin: '', orden: '',
   });
   const [editandoId, setEditandoId] = useState(null);
   const [imagen, setImagen] = useState(null);
@@ -26,137 +33,151 @@ export default function Admin() {
   const [tiemposForm, setTiemposForm] = useState({});
   const [guardando, setGuardando] = useState(false);
   const [mensaje, setMensaje] = useState({ texto: '', tipo: '' });
+  const [confirmarEliminarId, setConfirmarEliminarId] = useState(null);
+  const [confirmarCerrarMesaId, setConfirmarCerrarMesaId] = useState(null);
 
-  const formVacio = { nombre: "", precio: "", categoria: "", descripcion: "", imagenUrl: "", disponible: true, tiempoMin: "" };
+  const formVacio = {
+    nombre: '', precio: '', categoria: '',
+    descripcion: '', imagenUrl: '', disponible: true, tiempoMin: '', orden: '',
+  };
 
+  // ─── Valores derivados ────────────────────────────────────
+  const fechaSeleccionada = useMemo(() => {
+    const [y, m, d] = fechaFiltro.split('-').map(Number);
+    return new Date(y, m - 1, d, 12, 0, 0);
+  }, [fechaFiltro]);
+
+  const esHoy = fechaFiltro === localDateStr();
+
+  const totalDia = useMemo(
+    () => pedidos.filter((p) => p.tipo !== 'llamada').reduce((sum, p) => sum + (p.total || 0), 0),
+    [pedidos]
+  );
+
+  const mesasActivas = useMemo(() => {
+    const activos = pedidos.filter((p) => p.estado !== 'archivado' && p.tipo !== 'llamada');
+    const agrupadas = activos.reduce((acc, p) => {
+      const k = p.mesa;
+      if (!acc[k]) acc[k] = { mesa: k, ids: [], total: 0, estado: 'listo' };
+      acc[k].ids.push(p.id);
+      acc[k].total += p.total || 0;
+      if (p.estado === 'pendiente') acc[k].estado = 'pendiente';
+      return acc;
+    }, {});
+    return Object.values(agrupadas)
+      .sort((a, b) => String(a.mesa).localeCompare(String(b.mesa), undefined, { numeric: true }));
+  }, [pedidos]);
+
+  const platosOrdenados = useMemo(
+    () => [...platos].sort((a, b) => (a.orden ?? 999) - (b.orden ?? 999)),
+    [platos]
+  );
+
+  const platosFiltrados = useMemo(() => {
+    if (!busqueda.trim()) return platosOrdenados;
+    const q = busqueda.toLowerCase();
+    return platosOrdenados.filter(
+      (p) => p.nombre.toLowerCase().includes(q) || p.categoria.toLowerCase().includes(q)
+    );
+  }, [platosOrdenados, busqueda]);
+
+  // ─── Helpers UI ───────────────────────────────────────────
   function mostrarMensaje(texto, tipo = 'ok') {
     setMensaje({ texto, tipo });
     setTimeout(() => setMensaje({ texto: '', tipo: '' }), 3500);
   }
-function generarCierrePDF() {
-  const pdf = new jsPDF();
-  const fechaStr = hoy.toLocaleDateString('es-DO', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 
-  // Encabezado
-  pdf.setFontSize(20);
-  pdf.text('Cierre de Caja', 105, 20, { align: 'center' });
-  pdf.setFontSize(11);
-  pdf.text(fechaStr, 105, 28, { align: 'center' });
-  pdf.line(15, 32, 195, 32);
-
-  // Resumen
-  pdf.setFontSize(13);
-  pdf.text(`Total del día: RD$${totalDia}`, 15, 42);
-  pdf.text(`Pedidos: ${pedidos.length}`, 15, 50);
-  pdf.line(15, 55, 195, 55);
-
-  // Platos más pedidos
-  const conteo = {};
-  pedidos.forEach(p => {
-    (p.items || []).forEach(item => {
-      if (!conteo[item.nombre]) conteo[item.nombre] = 0;
-      conteo[item.nombre] += 1;
+  function generarCierrePDF() {
+    const pdf = new jsPDF();
+    const fechaStr = fechaSeleccionada.toLocaleDateString('es-DO', {
+      weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
     });
-  });
-  const ranking = Object.entries(conteo).sort((a, b) => b[1] - a[1]).slice(0, 10);
 
-  pdf.setFontSize(12);
-  pdf.text('Platos más pedidos:', 15, 63);
-  pdf.setFontSize(10);
-  ranking.forEach(([nombre, cantidad], i) => {
-    pdf.text(`${i + 1}. ${nombre} — ${cantidad} ${cantidad === 1 ? 'vez' : 'veces'}`, 20, 71 + i * 8);
-  });
+    pdf.setFontSize(20);
+    pdf.text('Cierre de Caja', 105, 18, { align: 'center' });
+    if (nombreRestaurante) {
+      pdf.setFontSize(12);
+      pdf.text(nombreRestaurante, 105, 27, { align: 'center' });
+    }
+    pdf.setFontSize(11);
+    pdf.text(fechaStr, 105, nombreRestaurante ? 35 : 27, { align: 'center' });
+    pdf.line(15, nombreRestaurante ? 40 : 32, 195, nombreRestaurante ? 40 : 32);
 
-  const offsetDetalle = 75 + ranking.length * 8;
-  pdf.line(15, offsetDetalle, 195, offsetDetalle);
+    pdf.setFontSize(13);
+    const pedidosReales = pedidos.filter((p) => p.tipo !== 'llamada');
+    const yBase = nombreRestaurante ? 50 : 42;
+    pdf.text(`Total del día: RD$${totalDia}`, 15, yBase);
+    pdf.text(`Pedidos: ${pedidosReales.length}`, 15, yBase + 8);
+    pdf.line(15, yBase + 13, 195, yBase + 13);
 
-  // Detalle de pedidos
-  pdf.setFontSize(12);
-  pdf.text('Detalle de pedidos:', 15, offsetDetalle + 8);
-  pdf.setFontSize(9);
-
-  let y = offsetDetalle + 16;
-  [...pedidos]
-    .sort((a, b) => (a.creadoEn?.toMillis() || 0) - (b.creadoEn?.toMillis() || 0))
-    .forEach(p => {
-      if (y > 270) { pdf.addPage(); y = 15; }
-      const hora = p.creadoEn?.toDate().toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit' });
-      pdf.text(`Mesa ${p.mesa} — ${hora} — RD$${p.total}`, 15, y);
-      y += 6;
-      (p.items || []).forEach(item => {
-        if (y > 270) { pdf.addPage(); y = 15; }
-        pdf.text(`   · ${item.nombre}`, 15, y);
-        y += 5;
+    const conteo = {};
+    pedidosReales.forEach((p) => {
+      (p.items || []).forEach((item) => {
+        if (!conteo[item.nombre]) conteo[item.nombre] = 0;
+        conteo[item.nombre] += 1;
       });
-      y += 2;
+    });
+    const ranking = Object.entries(conteo).sort((a, b) => b[1] - a[1]).slice(0, 10);
+
+    const yRanking = yBase + 21;
+    pdf.setFontSize(12);
+    pdf.text('Platos más pedidos:', 15, yRanking);
+    pdf.setFontSize(10);
+    ranking.forEach(([nombre, cantidad], i) => {
+      pdf.text(`${i + 1}. ${nombre} — ${cantidad} ${cantidad === 1 ? 'vez' : 'veces'}`, 20, yRanking + 8 + i * 8);
     });
 
-  pdf.save(`cierre-${hoy.toISOString().slice(0, 10)}.pdf`);
-}
+    const offsetDetalle = yRanking + 12 + ranking.length * 8;
+    pdf.line(15, offsetDetalle, 195, offsetDetalle);
+    pdf.setFontSize(12);
+    pdf.text('Detalle de pedidos:', 15, offsetDetalle + 8);
+    pdf.setFontSize(9);
+
+    let y = offsetDetalle + 16;
+    [...pedidosReales]
+      .sort((a, b) => (a.creadoEn?.toMillis() || 0) - (b.creadoEn?.toMillis() || 0))
+      .forEach((p) => {
+        if (y > 270) { pdf.addPage(); y = 15; }
+        const hora = p.creadoEn?.toDate().toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit' });
+        pdf.text(`Mesa ${p.mesa} — ${hora} — RD$${p.total}`, 15, y);
+        y += 6;
+        (p.items || []).forEach((item) => {
+          if (y > 270) { pdf.addPage(); y = 15; }
+          pdf.text(`   · ${item.nombre}`, 15, y);
+          y += 5;
+        });
+        y += 2;
+      });
+
+    pdf.save(`cierre-${fechaFiltro}.pdf`);
+  }
+
+  // ─── Effect 1: acceso + platos ────────────────────────────
   useEffect(() => {
-    const cargarRestaurante = async () => {
-      try {
-        const snap = await getDoc(doc(db, 'restaurantes', restauranteId));
-        if (snap.exists()) setTiemposForm(snap.data().tiempos || {});
-      } catch (e) {
-        console.error('Error cargando restaurante:', e);
-      }
-    };
-    cargarRestaurante();
+    verificarAccesoAdmin(restauranteId)
+      .then(({ acceso: ok, nombre, tiempos }) => {
+        setAcceso(ok);
+        if (ok) {
+          setNombreRestaurante(nombre);
+          setTiemposForm(tiempos);
+        }
+      })
+      .catch((e) => { console.error('Error verificando acceso admin:', e); setAcceso(false); });
 
-    const unsubPlatos = onSnapshot(
-      collection(db, "restaurantes", restauranteId, "platos"),
-      (snap) => setPlatos(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
-      (err) => console.error('Error en platos:', err)
-    );
-
-    const inicioDia = new Date();
-    inicioDia.setHours(0, 0, 0, 0);
-
-    const unsubPedidos = onSnapshot(
-      query(
-        collection(db, "restaurantes", restauranteId, "pedidos"),
-        where("creadoEn", ">=", Timestamp.fromDate(inicioDia))
-      ),
-      (snap) => setPedidos(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
-      (err) => console.error('Error en pedidos:', err)
-    );
-
-    return () => {
-      unsubPlatos();
-      unsubPedidos();
-    };
+    return subscribePlatos(restauranteId, setPlatos);
   }, [restauranteId]);
 
-  async function cerrarSesion() {
-    try { await signOut(auth); } catch (e) { console.error(e); }
-  }
+  // ─── Effect 2: pedidos del día ────────────────────────────
+  useEffect(() => {
+    if (acceso !== true) return;
+    return subscribePedidosDia(restauranteId, fechaFiltro, setPedidos);
+  }, [restauranteId, fechaFiltro, acceso]);
+
+  // ─── Acciones ─────────────────────────────────────────────
+  const cerrarSesion = () => logout().catch(console.error);
 
   const handleChange = (e) => setForm({ ...form, [e.target.name]: e.target.value });
 
-  async function subirImagen() {
-  if (!imagen) return null;
-  if (imagen.size > 10 * 1024 * 1024) {
-    mostrarMensaje('La imagen supera los 10MB.', 'error');
-    return 'ERROR';
-  }
-
-  try {
-    const opciones = {
-      maxSizeMB: 0.5,
-      maxWidthOrHeight: 1024,
-      useWebWorker: true,
-    };
-    const imagenComprimida = await imageCompression(imagen, opciones);
-    const storageRef = ref(storage, `platos/${Date.now()}_${imagen.name}`);
-    await uploadBytes(storageRef, imagenComprimida);
-    return await getDownloadURL(storageRef);
-  } catch (e) {
-    console.error('Error subiendo imagen:', e);
-    mostrarMensaje('Error al subir la imagen.', 'error');
-    return 'ERROR';
-  }
-}
   const guardar = async () => {
     if (!form.nombre || !form.precio || !form.categoria) {
       mostrarMensaje('Nombre, precio y categoría son obligatorios.', 'error');
@@ -164,54 +185,95 @@ function generarCierrePDF() {
     }
     setGuardando(true);
     try {
-      const urlImagen = await subirImagen();
-      if (urlImagen === 'ERROR') { setGuardando(false); return; }
-
-      const datos = {
-        ...form,
-        precio: Number(form.precio),
-        tiempoMin: Number(form.tiempoMin) || 0,
-        imagenUrl: urlImagen || form.imagenUrl,
-      };
-
-      if (editandoId) {
-        await updateDoc(doc(db, "restaurantes", restauranteId, "platos", editandoId), datos);
-        setEditandoId(null);
-      } else {
-        await addDoc(collection(db, "restaurantes", restauranteId, "platos"), datos);
-      }
-
+      await guardarPlato(restauranteId, form, imagen, editandoId);
+      setEditandoId(null);
       setForm(formVacio);
       setImagen(null);
-      setFileKey(k => k + 1);
+      setFileKey((k) => k + 1);
       mostrarMensaje('Plato guardado correctamente.', 'ok');
     } catch (e) {
       console.error('Error guardando plato:', e);
-      mostrarMensaje('Error al guardar. Intenta de nuevo.', 'error');
+      mostrarMensaje(
+        e.message === 'La imagen supera los 3MB.' ? e.message : 'Error al guardar. Intenta de nuevo.',
+        'error'
+      );
     } finally {
       setGuardando(false);
     }
   };
 
-  const editar = (plato) => { setForm(plato); setEditandoId(plato.id); };
-
-  const eliminar = async (id) => {
-    try { await deleteDoc(doc(db, "restaurantes", restauranteId, "platos", id)); }
-    catch (e) { console.error('Error eliminando:', e); }
+  const editar = (plato) => {
+    setForm({ ...plato, orden: plato.orden ?? '' });
+    setEditandoId(plato.id);
   };
 
-  async function guardarTiempos() {
+  const eliminar = async (id) => {
     try {
-      await updateDoc(doc(db, 'restaurantes', restauranteId), { tiempos: tiemposForm });
-      mostrarMensaje('Tiempos guardados.', 'ok');
+      const plato = platos.find((p) => p.id === id);
+      await eliminarPlato(restauranteId, id, plato?.imagenUrl);
+      setConfirmarEliminarId(null);
     } catch (e) {
+      console.error('Error eliminando:', e);
+      mostrarMensaje('Error al eliminar el plato.', 'error');
+    }
+  };
+
+  const handleGuardarTiempos = async () => {
+    try {
+      await guardarTiempos(restauranteId, tiemposForm);
+      mostrarMensaje('Tiempos guardados.', 'ok');
+    } catch {
       mostrarMensaje('Error al guardar tiempos.', 'error');
     }
+  };
+
+  const copiarUid = async () => {
+    const uid = getUid();
+    if (!uid) return;
+    try {
+      await navigator.clipboard.writeText(uid);
+      mostrarMensaje('UID copiado al portapapeles.', 'ok');
+    } catch {
+      mostrarMensaje(`UID: ${uid}`, 'ok');
+    }
+  };
+
+  const archivarMesaAdmin = (ids) =>
+    actualizarEstadoMesa(restauranteId, ids, 'archivado')
+      .catch(() => mostrarMensaje('Error al cerrar la mesa.', 'error'));
+
+  const marcarListaMesaAdmin = (ids) =>
+    actualizarEstadoMesa(restauranteId, ids, 'listo')
+      .catch(() => mostrarMensaje('Error al marcar la mesa.', 'error'));
+
+  // ─── Early returns ────────────────────────────────────────
+  if (acceso === null) return <div className="min-h-screen bg-neutral-950" />;
+
+  if (acceso === false) {
+    return (
+      <div className="min-h-screen bg-neutral-950 text-white font-serif flex items-center justify-center">
+        <div className="text-center px-6">
+          <p className="text-red-400 text-xs tracking-widest uppercase mb-2">Sin acceso</p>
+          <h1 className="text-2xl font-bold mb-4">No tienes permiso</h1>
+          <p className="text-neutral-500 text-sm mb-6">
+            Tu cuenta no tiene acceso al panel de administración de este restaurante.
+          </p>
+          <div className="space-y-3">
+            <a href={`/restaurante/${restauranteId}/cocina`}
+              className="block text-sm border border-amber-400 text-amber-400 px-6 py-2 hover:bg-amber-400 hover:text-black transition-colors">
+              Ir al panel de cocina
+            </a>
+            <button onClick={cerrarSesion}
+              className="block w-full text-xs border border-neutral-600 text-neutral-400 px-4 py-2 hover:border-red-400 hover:text-red-400 transition-colors">
+              Cerrar sesión
+            </button>
+          </div>
+        </div>
+      </div>
+    );
   }
 
-  const hoy = new Date();
-  const totalDia = pedidos.reduce((sum, p) => sum + (p.total || 0), 0);
-
+  // ─── Vista ────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-neutral-950 text-white font-serif">
 
@@ -220,6 +282,9 @@ function generarCierrePDF() {
         <div>
           <p className="text-amber-400 text-xs tracking-widest uppercase">Panel de</p>
           <h1 className="text-2xl font-bold">Administración</h1>
+          {nombreRestaurante && (
+            <p className="text-neutral-500 text-xs mt-0.5">{nombreRestaurante}</p>
+          )}
         </div>
         <button onClick={cerrarSesion}
           className="text-xs border border-neutral-600 text-neutral-400 px-3 py-1 hover:border-red-400 hover:text-red-400 transition-colors">
@@ -238,7 +303,7 @@ function generarCierrePDF() {
 
       <div className="max-w-lg mx-auto px-4 py-6">
 
-        {/* Formulario */}
+        {/* ── Formulario de plato ── */}
         <div className="border border-neutral-800 p-6 space-y-3 mb-8">
           <h2 className="text-amber-400 text-xs tracking-widest uppercase mb-4">
             {editandoId ? 'Editar plato' : 'Nuevo plato'}
@@ -248,6 +313,8 @@ function generarCierrePDF() {
           <input name="precio" placeholder="Precio *" type="number" value={form.precio} onChange={handleChange}
             className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400" />
           <input name="categoria" placeholder="Categoría *" value={form.categoria} onChange={handleChange}
+            className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400" />
+          <input name="orden" placeholder="Orden de aparición en menú (1, 2, 3…)" type="number" value={form.orden} onChange={handleChange}
             className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400" />
 
           {form.categoria?.toLowerCase() === 'bebidas' ? (
@@ -284,34 +351,66 @@ function generarCierrePDF() {
           </div>
         </div>
 
-        {/* Lista de platos */}
-        <h2 className="text-amber-400 text-xs tracking-widest uppercase mb-4">Platos</h2>
+        {/* ── Lista de platos ── */}
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-amber-400 text-xs tracking-widest uppercase">
+            Platos ({platos.length})
+          </h2>
+          <input
+            type="text"
+            placeholder="Buscar nombre o categoría…"
+            value={busqueda}
+            onChange={(e) => setBusqueda(e.target.value)}
+            className="bg-neutral-900 border border-neutral-700 px-3 py-1 text-white placeholder-neutral-500 text-xs focus:outline-none focus:border-amber-400 w-44"
+          />
+        </div>
         <div className="space-y-3">
-          {platos.map((p) => (
+          {platosFiltrados.map((p) => (
             <div key={p.id} className="flex justify-between items-center border-b border-neutral-800 pb-3">
               <div>
                 <p className="font-semibold">{p.nombre}</p>
                 <p className="text-neutral-400 text-sm">{p.categoria} — RD${p.precio}</p>
+                {p.orden !== undefined && p.orden !== '' &&
+                  <p className="text-neutral-600 text-xs">Orden: {p.orden}</p>}
               </div>
-              <div className="flex gap-2">
+              <div className="flex gap-2 flex-wrap justify-end">
                 <button onClick={() => editar(p)}
                   className="text-xs border border-neutral-600 text-neutral-400 px-3 py-1 hover:border-amber-400 hover:text-amber-400 transition-colors">
                   Editar
                 </button>
-                <button onClick={() => updateDoc(doc(db, "restaurantes", restauranteId, "platos", p.id), { disponible: !p.disponible })}
-                  className={`text-xs border px-3 py-1 transition-colors ${p.disponible !== false ? 'border-neutral-600 text-neutral-400 hover:border-red-400 hover:text-red-400' : 'border-amber-400 text-amber-400'}`}>
+                <button
+                  onClick={() => toggleDisponible(restauranteId, p.id, p.disponible !== false)}
+                  className={`text-xs border px-3 py-1 transition-colors ${p.disponible !== false
+                    ? 'border-neutral-600 text-neutral-400 hover:border-red-400 hover:text-red-400'
+                    : 'border-amber-400 text-amber-400'}`}>
                   {p.disponible !== false ? 'Desactivar' : 'Activar'}
                 </button>
-                <button onClick={() => eliminar(p.id)}
-                  className="text-xs border border-neutral-600 text-neutral-400 px-3 py-1 hover:border-red-400 hover:text-red-400 transition-colors">
-                  Eliminar
-                </button>
+                {confirmarEliminarId === p.id ? (
+                  <>
+                    <button onClick={() => eliminar(p.id)}
+                      className="text-xs border border-red-400 text-red-400 px-3 py-1 transition-colors">
+                      ¿Confirmar?
+                    </button>
+                    <button onClick={() => setConfirmarEliminarId(null)}
+                      className="text-xs border border-neutral-600 text-neutral-400 px-3 py-1 transition-colors">
+                      No
+                    </button>
+                  </>
+                ) : (
+                  <button onClick={() => setConfirmarEliminarId(p.id)}
+                    className="text-xs border border-neutral-600 text-neutral-400 px-3 py-1 hover:border-red-400 hover:text-red-400 transition-colors">
+                    Eliminar
+                  </button>
+                )}
               </div>
             </div>
           ))}
+          {platosFiltrados.length === 0 && busqueda && (
+            <p className="text-neutral-500 text-sm">Sin resultados para "{busqueda}".</p>
+          )}
         </div>
 
-        {/* Tiempos de espera */}
+        {/* ── Tiempos de espera ── */}
         <div className="border border-neutral-800 p-6 mt-8">
           <h2 className="text-amber-400 text-xs tracking-widest uppercase mb-4">Tiempos de espera</h2>
           <div className="flex items-center gap-3">
@@ -320,33 +419,103 @@ function generarCierrePDF() {
               onChange={(e) => setTiemposForm({ ...tiemposForm, bebidas: Number(e.target.value) })}
               className="w-24 bg-neutral-900 border border-neutral-700 px-3 py-2 text-white focus:outline-none focus:border-amber-400" />
           </div>
-          <button onClick={guardarTiempos}
+          <button onClick={handleGuardarTiempos}
             className="mt-4 bg-amber-400 text-black px-6 py-2 font-bold hover:bg-amber-300 transition-colors">
             Guardar tiempos
           </button>
         </div>
 
-        {/* Historial de ventas del día */}
+        {/* ── Mesas activas ── */}
+        {mesasActivas.length > 0 && (
+          <div className="border border-neutral-800 p-6 mt-8">
+            <h2 className="text-amber-400 text-xs tracking-widest uppercase mb-1">Mesas activas</h2>
+            <p className="text-neutral-500 text-xs mb-6">
+              {esHoy ? 'Pedidos en curso — puedes cerrar una mesa manualmente' : 'Mesas sin cerrar de esta fecha'}
+            </p>
+            <div className="space-y-4">
+              {mesasActivas.map((mesa) => (
+                <div key={mesa.mesa} className="border border-neutral-800 p-4">
+                  <div className="flex justify-between items-center mb-3">
+                    <div>
+                      <p className="font-semibold">Mesa {mesa.mesa}</p>
+                      <p className="text-amber-400 font-bold text-sm">RD${mesa.total}</p>
+                    </div>
+                    <span className={`text-xs tracking-widest uppercase px-2 py-1 ${mesa.estado === 'pendiente' ? 'bg-amber-400 text-black' : 'bg-neutral-700 text-green-400'}`}>
+                      {mesa.estado}
+                    </span>
+                  </div>
+                  <div className="flex gap-2 flex-wrap">
+                    {mesa.estado === 'pendiente' && (
+                      <button onClick={() => marcarListaMesaAdmin(mesa.ids)}
+                        className="text-xs border border-neutral-600 text-neutral-400 px-3 py-1 hover:border-amber-400 hover:text-amber-400 transition-colors">
+                        Marcar lista
+                      </button>
+                    )}
+                    {confirmarCerrarMesaId === mesa.mesa ? (
+                      <>
+                        <button
+                          onClick={() => { archivarMesaAdmin(mesa.ids); setConfirmarCerrarMesaId(null); }}
+                          className="text-xs border border-red-400 text-red-400 px-3 py-1 transition-colors">
+                          ¿Confirmar cierre?
+                        </button>
+                        <button onClick={() => setConfirmarCerrarMesaId(null)}
+                          className="text-xs border border-neutral-600 text-neutral-400 px-3 py-1 transition-colors">
+                          No
+                        </button>
+                      </>
+                    ) : (
+                      <button onClick={() => setConfirmarCerrarMesaId(mesa.mesa)}
+                        className="text-xs border border-neutral-600 text-neutral-400 px-3 py-1 hover:border-red-400 hover:text-red-400 transition-colors">
+                        Cerrar mesa
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ── Ventas ── */}
         <div className="border border-neutral-800 p-6 mt-8">
-          <h2 className="text-amber-400 text-xs tracking-widest uppercase mb-1">Ventas del día</h2>
+          <div className="flex items-center justify-between mb-1">
+            <h2 className="text-amber-400 text-xs tracking-widest uppercase">Ventas</h2>
+            {!esHoy && (
+              <button onClick={() => setFechaFiltro(localDateStr())}
+                className="text-xs text-amber-400 hover:underline">
+                Volver a hoy
+              </button>
+            )}
+          </div>
+          <div className="flex items-center gap-3 mt-3 mb-4">
+            <input
+              type="date"
+              value={fechaFiltro}
+              max={localDateStr()}
+              onChange={(e) => { if (e.target.value) setFechaFiltro(e.target.value); }}
+              className="bg-neutral-900 border border-neutral-700 px-3 py-2 text-white focus:outline-none focus:border-amber-400 text-sm"
+            />
+          </div>
           <p className="text-neutral-500 text-xs mb-6">
-            {hoy.toLocaleDateString('es-DO', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+            {fechaSeleccionada.toLocaleDateString('es-DO', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
           </p>
 
           <div className="border border-neutral-700 p-4 mb-6">
             <p className="text-neutral-400 text-xs tracking-widest uppercase">Total del día</p>
             <p className="text-3xl font-bold text-amber-400 mt-1">RD${totalDia}</p>
-            <p className="text-neutral-500 text-xs mt-1">{pedidos.length} pedido(s)</p>
+            <p className="text-neutral-500 text-xs mt-1">
+              {pedidos.filter((p) => p.tipo !== 'llamada').length} pedido(s)
+            </p>
           </div>
-        
-        
+
           <div className="space-y-4">
-            {pedidos.length === 0 && (
-              <p className="text-neutral-500 text-sm">No hay pedidos hoy todavía.</p>
+            {pedidos.filter((p) => p.tipo !== 'llamada').length === 0 && (
+              <p className="text-neutral-500 text-sm">No hay pedidos para esta fecha.</p>
             )}
             {[...pedidos]
+              .filter((p) => p.tipo !== 'llamada')
               .sort((a, b) => (b.creadoEn?.toMillis() || 0) - (a.creadoEn?.toMillis() || 0))
-              .map(p => (
+              .map((p) => (
                 <div key={p.id} className="border-b border-neutral-800 pb-4">
                   <div className="flex justify-between items-start">
                     <div>
@@ -377,58 +546,62 @@ function generarCierrePDF() {
               ))}
           </div>
 
-          {/* Estadísticas — platos más pedidos */}
-<div className="border border-neutral-800 p-6 mt-8">
-  <h2 className="text-amber-400 text-xs tracking-widest uppercase mb-1">Platos más pedidos</h2>
-  <p className="text-neutral-500 text-xs mb-6">Basado en los pedidos de hoy</p>
-
-  {(() => {
-    const conteo = {};
-    pedidos.forEach(p => {
-      (p.items || []).forEach(item => {
-        if (!conteo[item.nombre]) conteo[item.nombre] = 0;
-        conteo[item.nombre] += 1;
-      });
-    });
-
-    const ranking = Object.entries(conteo)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 10);
-
-    if (ranking.length === 0) {
-      return <p className="text-neutral-500 text-sm">No hay datos todavía.</p>;
-    }
-
-    const maximo = ranking[0][1];
-
-    return (
-      <div className="space-y-3">
-        {ranking.map(([nombre, cantidad], i) => (
-          <div key={nombre}>
-            <div className="flex justify-between items-center mb-1">
-              <span className="text-sm text-white">
-                <span className="text-amber-400 mr-2">#{i + 1}</span>{nombre}
-              </span>
-              <span className="text-neutral-400 text-xs">{cantidad} {cantidad === 1 ? 'vez' : 'veces'}</span>
-            </div>
-            <div className="w-full bg-neutral-800 h-1">
-              <div
-                className="bg-amber-400 h-1 transition-all"
-                style={{ width: `${(cantidad / maximo) * 100}%` }}
-              />
-            </div>
-              </div>
-              ))}
-              </div>
+          {/* Platos más pedidos */}
+          <div className="border border-neutral-800 p-6 mt-8">
+            <h2 className="text-amber-400 text-xs tracking-widest uppercase mb-1">Platos más pedidos</h2>
+            <p className="text-neutral-500 text-xs mb-6">
+              {esHoy
+                ? 'Basado en los pedidos de hoy'
+                : `Basado en pedidos del ${fechaSeleccionada.toLocaleDateString('es-DO', { month: 'long', day: 'numeric' })}`}
+            </p>
+            {(() => {
+              const conteo = {};
+              pedidos.filter((p) => p.tipo !== 'llamada').forEach((p) => {
+                (p.items || []).forEach((item) => {
+                  if (!conteo[item.nombre]) conteo[item.nombre] = 0;
+                  conteo[item.nombre] += 1;
+                });
+              });
+              const ranking = Object.entries(conteo).sort((a, b) => b[1] - a[1]).slice(0, 10);
+              if (ranking.length === 0) return <p className="text-neutral-500 text-sm">No hay datos todavía.</p>;
+              const maximo = ranking[0][1];
+              return (
+                <div className="space-y-3">
+                  {ranking.map(([nombre, cantidad], i) => (
+                    <div key={nombre}>
+                      <div className="flex justify-between items-center mb-1">
+                        <span className="text-sm text-white">
+                          <span className="text-amber-400 mr-2">#{i + 1}</span>{nombre}
+                        </span>
+                        <span className="text-neutral-400 text-xs">{cantidad} {cantidad === 1 ? 'vez' : 'veces'}</span>
+                      </div>
+                      <div className="w-full bg-neutral-800 h-1">
+                        <div className="bg-amber-400 h-1 transition-all" style={{ width: `${(cantidad / maximo) * 100}%` }} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
               );
-              })()}
-              </div>
-            </div>
-<button
-  onClick={generarCierrePDF}
-  className="mt-6 bg-amber-400 text-black px-6 py-2 font-bold hover:bg-amber-300 transition-colors w-full">
-  ⬇ Descargar cierre de caja PDF
-</button>
+            })()}
+          </div>
+
+          <button
+            onClick={generarCierrePDF}
+            className="mt-6 bg-amber-400 text-black px-6 py-2 font-bold hover:bg-amber-300 transition-colors w-full">
+            ⬇ Descargar cierre de caja PDF
+          </button>
+        </div>
+
+        {/* ── UID del usuario ── */}
+        <div className="mt-12 border-t border-neutral-800 pt-6 pb-8 text-center">
+          <p className="text-neutral-700 text-xs mb-2">Tu identificador de usuario</p>
+          <button onClick={copiarUid}
+            className="text-neutral-600 text-xs font-mono hover:text-amber-400 transition-colors break-all">
+            {getUid()}
+          </button>
+          <p className="text-neutral-700 text-xs mt-1">Toca para copiar — compártelo con el maestro para que te asigne acceso</p>
+        </div>
+
       </div>
     </div>
   );

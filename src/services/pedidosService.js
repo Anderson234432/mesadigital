@@ -1,11 +1,10 @@
-import {
-  collection, doc, writeBatch, serverTimestamp, increment,
-} from 'firebase/firestore';
+import { collection, doc, writeBatch, serverTimestamp } from 'firebase/firestore';
 import { getApps } from 'firebase/app';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { db } from '../firebase';
+import * as pedidosRepo from '../repositories/pedidosRepository';
 
-// Only retry on transient/network errors — not on validation errors from the function
+// ─── Retry logic ──────────────────────────────────────────
 const RETRYABLE = ['unavailable', 'deadline-exceeded', 'resource-exhausted'];
 const BACKOFF_MS = [1000, 2000, 4000];
 
@@ -16,14 +15,15 @@ async function withBackoff(fn) {
     catch (e) {
       lastErr = e;
       const code = e?.code || '';
-      const isRetryable = RETRYABLE.some(c => code.includes(c));
+      const isRetryable = RETRYABLE.some((c) => code.includes(c));
       if (!isRetryable || i >= BACKOFF_MS.length) throw e;
-      await new Promise(r => setTimeout(r, BACKOFF_MS[i]));
+      await new Promise((r) => setTimeout(r, BACKOFF_MS[i]));
     }
   }
   throw lastErr;
 }
 
+// ─── Cloud Function (lazy init) ───────────────────────────
 let _crearPedidoFn = null;
 function getCrearPedidoFn() {
   if (!_crearPedidoFn) {
@@ -32,11 +32,10 @@ function getCrearPedidoFn() {
   return _crearPedidoFn;
 }
 
-export async function enviarPedido(restauranteId, { mesa, carrito, total, nota, clienteUid }) {
-  // Compact carrito into {id, cantidad} pairs for the Cloud Function.
-  // The server re-fetches real prices — the client never dictates cost.
+// ─── Envío de pedido (Cloud Function + fallback directo) ──
+export function enviarPedido(restauranteId, { mesa, carrito, total, nota, clienteUid }) {
   const itemsAgrupados = carrito.reduce((acc, item) => {
-    const e = acc.find(i => i.id === item.id);
+    const e = acc.find((i) => i.id === item.id);
     if (e) e.cantidad += 1;
     else acc.push({ id: item.id, cantidad: 1 });
     return acc;
@@ -44,25 +43,20 @@ export async function enviarPedido(restauranteId, { mesa, carrito, total, nota, 
 
   async function tentarEnvio() {
     try {
-      // Cloud Function path: server validates prices
       await getCrearPedidoFn()({ restauranteId, mesa, items: itemsAgrupados, nota, clienteUid });
     } catch (cfErr) {
       const cfCode = cfErr?.code || '';
-      // If the function isn't deployed or unreachable, fall back to direct write.
-      // Any other error (validation, not-found, etc.) is re-thrown immediately.
       const notDeployed =
         cfCode.includes('not-found') ||
         cfCode.includes('unavailable') ||
         cfCode.includes('internal');
       if (!notDeployed) throw cfErr;
 
-      // Fallback: direct Firestore write (no server-side price validation).
-      // Prices come from the client — acceptable only until Cloud Functions are deployed.
       const pedidoRef = doc(collection(db, 'restaurantes', restauranteId, 'pedidos'));
       const batch = writeBatch(db);
       batch.set(pedidoRef, {
         mesa,
-        items: carrito.map(p => ({ nombre: p.nombre, precio: p.precio, tiempoMin: p.tiempoMin || 0 })),
+        items: carrito.map((p) => ({ nombre: p.nombre, precio: p.precio, tiempoMin: p.tiempoMin || 0 })),
         total,
         estado: 'pendiente',
         nota: nota.slice(0, 500),
@@ -76,6 +70,7 @@ export async function enviarPedido(restauranteId, { mesa, carrito, total, nota, 
   return withBackoff(tentarEnvio);
 }
 
+// ─── Llamada al mesero ────────────────────────────────────
 export function llamarMesero(restauranteId, mesa, clienteUid) {
   return withBackoff(() => {
     const batch = writeBatch(db);
@@ -94,17 +89,51 @@ export function llamarMesero(restauranteId, mesa, clienteUid) {
   });
 }
 
-export function actualizarEstadoMesa(restauranteId, ids, estado) {
-  const batch = writeBatch(db);
-  ids.forEach(id =>
-    batch.update(doc(db, 'restaurantes', restauranteId, 'pedidos', id), { estado })
+// ─── Estado de mesas ──────────────────────────────────────
+export const actualizarEstadoMesa = (restauranteId, ids, estado) =>
+  pedidosRepo.actualizarEstadoPedidos(restauranteId, ids, estado);
+
+// ─── Subscripciones ───────────────────────────────────────
+export function subscribePedidosDia(restauranteId, fechaFiltro, cb) {
+  const [y, m, d] = fechaFiltro.split('-').map(Number);
+  const inicioDia = new Date(y, m - 1, d, 0, 0, 0, 0);
+  const finDia = new Date(y, m - 1, d, 23, 59, 59, 999);
+  return pedidosRepo.subscribePedidosFecha(
+    restauranteId, inicioDia, finDia,
+    cb,
+    (err) => console.error('subscribePedidosDia:', err)
   );
-  // Decrement the active-mesa counter when a mesa is fully archived.
-  // Clamped to >= 0 in the UI. The counter is incremented by the Cloud Function on create.
-  if (estado === 'archivado') {
-    batch.update(doc(db, 'restaurantes', restauranteId), {
-      'stats.mesasPendientes': increment(-1),
-    });
+}
+
+export function subscribePedidosHoy(restauranteId, cb) {
+  const inicioDia = new Date();
+  inicioDia.setHours(0, 0, 0, 0);
+  return pedidosRepo.subscribePedidosDesde(
+    restauranteId, inicioDia,
+    cb,
+    (err) => console.error('subscribePedidosHoy:', err)
+  );
+}
+
+export const subscribePedidosPorUid = (restauranteId, clienteUid, cb, onError) =>
+  pedidosRepo.subscribePedidosPorUid(restauranteId, clienteUid, cb, onError);
+
+export const subscribePedidosPorMesa = (restauranteId, numeroMesa, cb, onError) =>
+  pedidosRepo.subscribePedidosPorMesa(restauranteId, numeroMesa, cb, onError);
+
+// ─── Clasificación de errores ─────────────────────────────
+export function parsearErrorPedido(e) {
+  const code = (e?.code || '').toLowerCase();
+  const msg = (e?.message || '').toLowerCase();
+  if (code.includes('resource-exhausted') || msg.includes('demasiados'))
+    return 'Demasiados pedidos seguidos. Espera un momento e intenta de nuevo.';
+  if (code.includes('not-found') || msg.includes('no existe'))
+    return 'Un plato ya no está en el menú. Recarga la página e intenta de nuevo.';
+  if (code.includes('failed-precondition') || msg.includes('disponible')) {
+    const match = e?.message?.match(/"([^"]+)"/);
+    return match ? `"${match[1]}" ya no está disponible.` : 'Un plato ya no está disponible.';
   }
-  return batch.commit();
+  if (code.includes('invalid-argument'))
+    return 'Error en el pedido. Verifica tu selección e intenta de nuevo.';
+  return 'Error al enviar el pedido. Intenta de nuevo.';
 }

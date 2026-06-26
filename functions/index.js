@@ -28,6 +28,30 @@ exports.crearPedido = onCall({ region: 'us-central1' }, async (request) => {
 
   const mesaStr = mesa.trim().slice(0, 20);
 
+  // ── Rate limiting: máx 5 pedidos por 60 s por UID ──────────────────────────
+  const uidKey = clienteUid || request.auth?.uid;
+  if (uidKey) {
+    const limitRef = db.doc(`restaurantes/${restauranteId}/_ratelimits/${uidKey}`);
+    const limitSnap = await limitRef.get();
+    const now = Date.now();
+    const windowMs = 60_000;
+    const maxRequests = 5;
+
+    if (limitSnap.exists) {
+      const { count, windowStart } = limitSnap.data();
+      if (now - windowStart < windowMs) {
+        if (count >= maxRequests) {
+          throw new HttpsError('resource-exhausted', 'Demasiados pedidos. Espera un momento antes de volver a pedir.');
+        }
+        await limitRef.update({ count: FieldValue.increment(1) });
+      } else {
+        await limitRef.set({ count: 1, windowStart: now });
+      }
+    } else {
+      await limitRef.set({ count: 1, windowStart: now });
+    }
+  }
+
   // ── Fetch verified prices from server ──────────────────────────────────────
   const platoSnaps = await Promise.all(
     items.map(item => db.doc(`restaurantes/${restauranteId}/platos/${item.id}`).get())

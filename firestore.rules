@@ -2,60 +2,103 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // ── Helpers ────────────────────────────────────────────────────────────────
+
+    function esMaestro() {
+      return request.auth != null
+        && request.auth.uid == 'xB7aybhKvYhIkuq7TERTuMfUkaH2';
+    }
+
+    function getRestaurante(restauranteId) {
+      return get(/databases/$(database)/documents/restaurantes/$(restauranteId)).data;
+    }
+
+    function restauranteExiste(restauranteId) {
+      return exists(/databases/$(database)/documents/restaurantes/$(restauranteId));
+    }
+
+    // Admin: maestro O usuario en adminUids del restaurante
+    function esAdmin(restauranteId) {
+      return esMaestro() || (
+        request.auth != null &&
+        restauranteExiste(restauranteId) &&
+        request.auth.uid in getRestaurante(restauranteId).get('adminUids', [])
+      );
+    }
+
+    // Personal del restaurante: admin O usuario en cocinaUids
+    function esPersonal(restauranteId) {
+      return esMaestro() || (
+        request.auth != null &&
+        restauranteExiste(restauranteId) && (
+          request.auth.uid in getRestaurante(restauranteId).get('adminUids', []) ||
+          request.auth.uid in getRestaurante(restauranteId).get('cocinaUids', [])
+        )
+      );
+    }
+
+    // ── Restaurantes ───────────────────────────────────────────────────────────
+
     match /restaurantes/{restauranteId} {
-      // Public read: customers need restaurant name, tiempos, and stats.mesasPendientes
+      // Lectura pública: clientes necesitan nombre, tiempos y stats
       allow read: if true;
-      // Only authenticated users (admin/master) can modify restaurants
-      allow create, update, delete: if request.auth != null;
+
+      // Solo el maestro puede crear o eliminar restaurantes
+      allow create, delete: if esMaestro();
+
+      // Admins del restaurante pueden actualizar (tiempos, platos, stats, roles)
+      // El personal de cocina también puede actualizar (stats.mesasPendientes al archivar)
+      allow update: if esPersonal(restauranteId);
+
+      // ── Platos ──────────────────────────────────────────────────────────────
 
       match /platos/{platoId} {
-        // Public read: customers browse the menu
+        // Lectura pública: clientes navegan el menú
         allow read: if true;
-        // Only authenticated users (admin) can manage dishes
-        allow write: if request.auth != null;
+        // Solo admins gestionan el menú
+        allow write: if esAdmin(restauranteId);
       }
 
+      // ── Pedidos ─────────────────────────────────────────────────────────────
+
       match /pedidos/{pedidoId} {
-        // Staff (email-authenticated) can read all orders.
-        // Anonymous customers can only read their own orders via clienteUid.
-        // This enforces table isolation: Mesa 5 cannot read Mesa 3's orders.
+        // Personal autenticado lee todos los pedidos.
+        // Clientes anónimos solo leen sus propios pedidos (aislamiento por mesa).
         allow read: if
           request.auth != null && (
-            request.auth.token.email != null ||
+            esPersonal(restauranteId) ||
             resource.data.get('clienteUid', '') == request.auth.uid
           );
 
-        // Customers (anonymous auth required) can create orders.
-        // The Cloud Function bypasses these rules via Admin SDK (recommended path).
-        // This rule is the fallback for direct writes when Cloud Functions are not deployed.
+        // Clientes (auth anónima requerida) pueden crear pedidos.
+        // La Cloud Function es el path normal (usa Admin SDK, omite estas reglas).
+        // Este es el fallback cuando Cloud Functions no está disponible.
         allow create: if
           request.auth != null &&
-          // Required fields
           request.resource.data.keys().hasAll(['mesa', 'items', 'total', 'estado', 'creadoEn']) &&
-          // New orders must start as pendiente
           request.resource.data.estado == 'pendiente' &&
-          // Mesa: non-empty string, max 20 chars
           request.resource.data.mesa is string &&
           request.resource.data.mesa.size() > 0 &&
           request.resource.data.mesa.size() <= 20 &&
-          // Total: non-negative, capped at RD$100,000
           request.resource.data.total is number &&
           request.resource.data.total >= 0 &&
           request.resource.data.total <= 100000 &&
-          // Items: list, max 30 entries
           request.resource.data.items is list &&
           request.resource.data.items.size() <= 30 &&
-          // Non-empty orders must have a positive total
           (request.resource.data.items.size() == 0 || request.resource.data.total > 0) &&
-          // Nota: optional string, max 500 chars
           request.resource.data.get('nota', '') is string &&
           request.resource.data.get('nota', '').size() <= 500;
 
-        // Only authenticated staff (cocina/admin) can change order state or archive.
-        // Anonymous customers cannot modify or delete any order.
+        // Solo personal (cocina y admin) puede cambiar estado o archivar pedidos
         allow update, delete: if
           request.auth != null &&
-          request.auth.token.email != null;
+          esPersonal(restauranteId);
+      }
+
+      // ── Rate limits (solo Cloud Function via Admin SDK) ──────────────────────
+      // No hay regla aquí → clientes no pueden leer ni escribir _ratelimits
+      match /_ratelimits/{uid} {
+        allow read, write: if false;
       }
     }
   }
