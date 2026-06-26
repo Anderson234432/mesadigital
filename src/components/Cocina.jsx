@@ -13,6 +13,14 @@ function Cocina() {
   const pedidosVistos = useRef(null);
   const [ahora, setAhora] = useState(Date.now());
   const audioContextRef = useRef(null);
+  const unsubPedidosRef = useRef(null);
+  const resubscribeRef = useRef(null);
+  const montadoRef = useRef(true);
+
+  useEffect(() => {
+    montadoRef.current = true;
+    return () => { montadoRef.current = false; };
+  }, []);
 
   // ─── Reloj para tiempo transcurrido ──────────────────────
   useEffect(() => {
@@ -57,10 +65,31 @@ function Cocina() {
   // ─── Cargar pedidos del día (espera acceso confirmado) ──────
   useEffect(() => {
     if (acceso !== true) return;
-    return subscribePedidosHoy(restauranteId, (todos) => {
-      setPedidos(todos.filter((p) => p.estado !== 'archivado'));
-    });
+
+    function subscribe() {
+      if (unsubPedidosRef.current) unsubPedidosRef.current();
+      unsubPedidosRef.current = subscribePedidosHoy(
+        restauranteId,
+        (todos) => { if (montadoRef.current) setPedidos(todos.filter((p) => p.estado !== 'archivado')); },
+        (err) => { console.error('Error pedidos cocina:', err); if (montadoRef.current) setTimeout(subscribe, 3000); }
+      );
+    }
+
+    resubscribeRef.current = subscribe;
+    subscribe();
+
+    return () => { if (unsubPedidosRef.current) unsubPedidosRef.current(); };
   }, [restauranteId, acceso]);
+
+  // ─── Re-suscribir al volver a la pestaña (crítico en móvil) ──
+  useEffect(() => {
+    const handle = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (resubscribeRef.current) resubscribeRef.current();
+    };
+    document.addEventListener('visibilitychange', handle);
+    return () => document.removeEventListener('visibilitychange', handle);
+  }, []);
 
   // ─── Detectar nuevos pedidos y notificar ─────────────────
   useEffect(() => {

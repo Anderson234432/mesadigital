@@ -78,13 +78,13 @@ export function subscribePedidosDia(restauranteId, fechaFiltro, cb) {
   );
 }
 
-export function subscribePedidosHoy(restauranteId, cb) {
+export function subscribePedidosHoy(restauranteId, cb, onError) {
   const inicioDia = new Date();
   inicioDia.setHours(0, 0, 0, 0);
   return pedidosRepo.subscribePedidosDesde(
     restauranteId, inicioDia,
     cb,
-    (err) => console.error('subscribePedidosHoy:', err)
+    onError || ((err) => console.error('subscribePedidosHoy:', err))
   );
 }
 
