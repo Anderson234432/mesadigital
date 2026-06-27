@@ -20,6 +20,15 @@ async function withBackoff(fn) {
   throw lastErr;
 }
 
+// ─── Reconexión y lectura puntual (polling móvil) ────────
+export const reconectarFirestore = () => pedidosRepo.reconectarFirestore();
+
+export function leerPedidosMesa(restauranteId, clienteUid, numeroMesa) {
+  return clienteUid
+    ? pedidosRepo.getPedidosPorUid(restauranteId, clienteUid)
+    : pedidosRepo.getPedidosPorMesa(restauranteId, numeroMesa);
+}
+
 // ─── Envío de pedido (Cloud Function + fallback directo) ──
 export function enviarPedido(restauranteId, { mesa, carrito, total, nota, clienteUid }) {
   const itemsAgrupados = carrito.reduce((acc, item) => {

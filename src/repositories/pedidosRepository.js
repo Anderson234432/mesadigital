@@ -1,8 +1,22 @@
 import {
   collection, doc, query, where, Timestamp,
-  onSnapshot, writeBatch, serverTimestamp, increment,
+  onSnapshot, getDocs, writeBatch, serverTimestamp, increment, enableNetwork,
 } from 'firebase/firestore';
 import { db } from '../firebase';
+
+export const reconectarFirestore = () => enableNetwork(db);
+
+export const getPedidosPorUid = (restauranteId, clienteUid) =>
+  getDocs(query(
+    collection(db, 'restaurantes', restauranteId, 'pedidos'),
+    where('clienteUid', '==', clienteUid)
+  )).then((snap) => snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+
+export const getPedidosPorMesa = (restauranteId, mesa) =>
+  getDocs(query(
+    collection(db, 'restaurantes', restauranteId, 'pedidos'),
+    where('mesa', '==', mesa)
+  )).then((snap) => snap.docs.map((d) => ({ id: d.id, ...d.data() })));
 
 export const subscribePedidosFecha = (restauranteId, inicioDia, finDia, onChange, onError) =>
   onSnapshot(

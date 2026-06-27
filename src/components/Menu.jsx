@@ -9,6 +9,8 @@ import {
   subscribePedidosPorUid,
   subscribePedidosPorMesa,
   parsearErrorPedido,
+  reconectarFirestore,
+  leerPedidosMesa,
 } from '../services/pedidosService';
 
 // Memoized plato card — only re-renders when its own props change
@@ -102,6 +104,7 @@ function Menu() {
   const subsRef = useRef({});
   const resubscribeRef = useRef(null);
   const retryTimerRef = useRef(null);
+  const pollTimerRef = useRef(null);
   const envioRef = useRef(false);
 
   useEffect(() => {
@@ -179,6 +182,20 @@ function Menu() {
     });
   }, []);
 
+  // ─── procesarPedidos (estable, usada también en polling) ──
+  const procesarPedidos = useCallback((datos) => {
+    if (!montadoRef.current) return;
+    const sessionMs = sessionStart.current;
+    const todos = datos.filter(
+      (p) => p.estado !== 'archivado' && (p.creadoEn?.toMillis() ?? 0) >= sessionMs
+    );
+    const conPedidos = todos.filter((p) => p.tipo !== 'llamada');
+    if (conPedidos.length === 0) setEstadoMesa(null);
+    else if (conPedidos.some((p) => p.estado === 'pendiente')) setEstadoMesa('pendiente');
+    else setEstadoMesa('listo');
+    setPedidosMesa(conPedidos);
+  }, []);
+
   // ─── Subscripciones Firebase ─────────────────────────────
   useEffect(() => {
     if (!authReady) return;
@@ -194,21 +211,6 @@ function Menu() {
       if (!montadoRef.current) return;
       setPlatos(datos);
     });
-
-    function procesarPedidos(datos) {
-      if (!montadoRef.current) return;
-      const sessionMs = sessionStart.current;
-      const todos = datos.filter(
-        (p) => p.estado !== 'archivado' && (p.creadoEn?.toMillis() ?? 0) >= sessionMs
-      );
-      const conPedidos = todos.filter((p) => p.tipo !== 'llamada');
-
-      if (conPedidos.length === 0) setEstadoMesa(null);
-      else if (conPedidos.some((p) => p.estado === 'pendiente')) setEstadoMesa('pendiente');
-      else setEstadoMesa('listo');
-
-      setPedidosMesa(conPedidos);
-    }
 
     function subscribe() {
       if (subsRef.current.miMesa) subsRef.current.miMesa();
@@ -226,22 +228,38 @@ function Menu() {
     resubscribeRef.current = subscribe;
     subscribe();
 
+    // Polling cada 30s como red de seguridad cuando onSnapshot se queda mudo
+    pollTimerRef.current = setInterval(() => {
+      if (document.visibilityState !== 'visible') return;
+      leerPedidosMesa(restauranteId, clienteUidRef.current, numeroMesa)
+        .then((datos) => { if (montadoRef.current) procesarPedidos(datos); })
+        .catch(() => {});
+    }, 30000);
+
     return () => {
       clearTimeout(retryTimerRef.current);
+      clearInterval(pollTimerRef.current);
       unsubRestaurante();
       unsubPlatos();
       if (subsRef.current.miMesa) subsRef.current.miMesa();
     };
-  }, [authReady, restauranteId, numeroMesa]);
+  }, [authReady, restauranteId, numeroMesa, procesarPedidos]);
 
-  // Re-suscribir al volver a la pestaña (crítico en móvil)
+  // Reconexión en móvil: visibilitychange + evento online
   useEffect(() => {
-    const handle = () => {
-      if (document.visibilityState !== 'visible') return;
+    async function reconectar() {
+      try { await reconectarFirestore(); } catch {}
       if (resubscribeRef.current) resubscribeRef.current();
+    }
+    const alVolver = () => {
+      if (document.visibilityState === 'visible') reconectar();
     };
-    document.addEventListener('visibilitychange', handle);
-    return () => document.removeEventListener('visibilitychange', handle);
+    document.addEventListener('visibilitychange', alVolver);
+    window.addEventListener('online', reconectar);
+    return () => {
+      document.removeEventListener('visibilitychange', alVolver);
+      window.removeEventListener('online', reconectar);
+    };
   }, []);
 
   // Persistir carrito en sessionStorage
