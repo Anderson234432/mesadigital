@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import { verificarAccesoCocina } from '../services/restaurantesService';
 import { actualizarEstadoMesa, subscribePedidosHoy } from '../services/pedidosService';
+import { subscribePlatos, toggleDisponible } from '../services/platosService';
 import { logout, getUid } from '../services/authService';
 
 function Cocina() {
@@ -10,6 +11,8 @@ function Cocina() {
   // ─── Estado ───────────────────────────────────────────────
   const [acceso, setAcceso] = useState(null); // null=cargando, true=ok, false=denegado
   const [pedidos, setPedidos] = useState([]);
+  const [platos, setPlatos] = useState([]);
+  const [disponibilidadAbierta, setDisponibilidadAbierta] = useState(false);
   const [sonidoActivo, setSonidoActivo] = useState(false);
   const pedidosVistos = useRef(null);
   const [ahora, setAhora] = useState(Date.now());
@@ -36,6 +39,12 @@ function Cocina() {
       .then(setAcceso)
       .catch((e) => { console.error('Error verificando acceso cocina:', e); setAcceso(false); });
   }, [restauranteId]);
+
+  // ─── Platos (disponibilidad rápida) ──────────────────────
+  useEffect(() => {
+    if (acceso !== true) return;
+    return subscribePlatos(restauranteId, setPlatos);
+  }, [restauranteId, acceso]);
 
   // ─── Notificaciones del navegador ────────────────────────
   useEffect(() => {
@@ -324,6 +333,47 @@ function Cocina() {
             )}
           </div>
         ))}
+
+        {/* ── Disponibilidad rápida ── */}
+        <div className="mt-8 border border-neutral-800">
+          <button
+            onClick={() => setDisponibilidadAbierta((v) => !v)}
+            className="w-full flex justify-between items-center px-4 py-3 text-sm text-neutral-400 hover:text-white transition-colors">
+            <span className="tracking-widest uppercase text-xs">Disponibilidad de platos</span>
+            <span>{disponibilidadAbierta ? '▼' : '▶'}</span>
+          </button>
+          {disponibilidadAbierta && (
+            <div className="border-t border-neutral-800 divide-y divide-neutral-800">
+              {platos.length === 0 && (
+                <p className="text-neutral-600 text-sm px-4 py-4">Sin platos cargados.</p>
+              )}
+              {[...platos]
+                .sort((a, b) => (a.categoria || '').localeCompare(b.categoria || '') || (a.orden ?? 999) - (b.orden ?? 999))
+                .map((p) => {
+                  const disponible = p.disponible !== false;
+                  return (
+                    <div key={p.id} className="flex justify-between items-center px-4 py-3">
+                      <div>
+                        <p className={`text-sm font-semibold ${disponible ? 'text-white' : 'text-neutral-600 line-through'}`}>
+                          {p.nombre}
+                        </p>
+                        <p className="text-neutral-600 text-xs capitalize">{p.categoria}</p>
+                      </div>
+                      <button
+                        onClick={() => toggleDisponible(restauranteId, p.id, disponible)}
+                        className={`text-xs border px-3 py-2 min-h-[44px] transition-colors ${
+                          disponible
+                            ? 'border-neutral-600 text-neutral-400 hover:border-red-400 hover:text-red-400'
+                            : 'border-amber-400 text-amber-400 hover:bg-amber-400 hover:text-black'
+                        }`}>
+                        {disponible ? 'Agotado' : 'Disponible'}
+                      </button>
+                    </div>
+                  );
+                })}
+            </div>
+          )}
+        </div>
 
         {/* UID del usuario */}
         <div className="mt-12 border-t border-neutral-800 pt-6 pb-8 text-center">
