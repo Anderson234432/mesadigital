@@ -68,6 +68,14 @@ export function subscribePedidosDia(restauranteId, fechaFiltro, cb) {
   );
 }
 
+export function subscribePedidosPeriodo(restauranteId, inicio, fin, cb) {
+  return pedidosRepo.subscribePedidosFecha(
+    restauranteId, inicio, fin,
+    cb,
+    (err) => console.error('subscribePedidosPeriodo:', err)
+  );
+}
+
 export function subscribePedidosHoy(restauranteId, cb, onError) {
   const inicioDia = new Date();
   inicioDia.setHours(0, 0, 0, 0);

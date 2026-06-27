@@ -4,7 +4,7 @@ import jsPDF from 'jspdf';
 import { QRCodeCanvas } from 'qrcode.react';
 import { verificarAccesoAdmin, guardarTiempos, guardarNumMesas } from '../services/restaurantesService';
 import { subscribePlatos, guardarPlato, eliminarPlato, toggleDisponible } from '../services/platosService';
-import { subscribePedidosDia, actualizarEstadoMesa } from '../services/pedidosService';
+import { subscribePedidosDia, subscribePedidosPeriodo, actualizarEstadoMesa } from '../services/pedidosService';
 import { logout, getUid } from '../services/authService';
 
 function localDateStr(date = new Date()) {
@@ -23,6 +23,9 @@ export default function Admin() {
   const [platos, setPlatos] = useState([]);
   const [pedidos, setPedidos] = useState([]);
   const [fechaFiltro, setFechaFiltro] = useState(localDateStr);
+  const [vistaVentas, setVistaVentas] = useState('dia');
+  const [semanaBase, setSemanaBase] = useState(localDateStr());
+  const [mesBase, setMesBase] = useState({ y: new Date().getFullYear(), m: new Date().getMonth() });
   const [busqueda, setBusqueda] = useState('');
   const [form, setForm] = useState({
     nombre: '', precio: '', categoria: '',
@@ -52,6 +55,31 @@ export default function Admin() {
 
   const esHoy = fechaFiltro === localDateStr();
 
+  const rangoPeriodo = useMemo(() => {
+    if (vistaVentas === 'dia') {
+      const [y, mo, d] = fechaFiltro.split('-').map(Number);
+      return { inicio: new Date(y, mo - 1, d, 0, 0, 0), fin: new Date(y, mo - 1, d, 23, 59, 59) };
+    }
+    if (vistaVentas === 'semana') {
+      const ref = new Date(semanaBase + 'T12:00:00');
+      const dow = ref.getDay();
+      const diffMon = dow === 0 ? -6 : 1 - dow;
+      const lun = new Date(ref); lun.setDate(ref.getDate() + diffMon); lun.setHours(0, 0, 0, 0);
+      const dom = new Date(lun); dom.setDate(lun.getDate() + 6); dom.setHours(23, 59, 59, 999);
+      return { inicio: lun, fin: dom };
+    }
+    const inicio = new Date(mesBase.y, mesBase.m, 1, 0, 0, 0);
+    const fin = new Date(mesBase.y, mesBase.m + 1, 0, 23, 59, 59);
+    return { inicio, fin };
+  }, [vistaVentas, fechaFiltro, semanaBase, mesBase]);
+
+  const labelPeriodo = useMemo(() => {
+    const fmt = (d, opts) => d.toLocaleDateString('es-DO', opts);
+    if (vistaVentas === 'dia') return fmt(fechaSeleccionada, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+    if (vistaVentas === 'semana') return `${fmt(rangoPeriodo.inicio, { day: 'numeric', month: 'short' })} – ${fmt(rangoPeriodo.fin, { day: 'numeric', month: 'short', year: 'numeric' })}`;
+    return fmt(rangoPeriodo.inicio, { month: 'long', year: 'numeric' });
+  }, [vistaVentas, fechaSeleccionada, rangoPeriodo]);
+
   const pedidosReales = useMemo(
     () => pedidos.filter((p) => p.tipo !== 'llamada'),
     [pedidos]
@@ -66,6 +94,22 @@ export default function Admin() {
     () => pedidosReales.length > 0 ? Math.round(totalDia / pedidosReales.length) : 0,
     [totalDia, pedidosReales]
   );
+
+  const desglosePorDia = useMemo(() => {
+    if (vistaVentas === 'dia') return [];
+    const mapa = {};
+    pedidosReales.forEach((p) => {
+      const d = p.creadoEn?.toDate();
+      if (!d) return;
+      const key = localDateStr(d);
+      if (!mapa[key]) mapa[key] = { fecha: d, total: 0, cantidad: 0 };
+      mapa[key].total += p.total || 0;
+      mapa[key].cantidad += 1;
+    });
+    return Object.entries(mapa)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([, v]) => v);
+  }, [pedidosReales, vistaVentas]);
 
   const mesasActivas = useMemo(() => {
     const activos = pedidos.filter((p) => p.estado !== 'archivado' && p.tipo !== 'llamada');
@@ -180,11 +224,12 @@ export default function Admin() {
     return subscribePlatos(restauranteId, setPlatos);
   }, [restauranteId]);
 
-  // ─── Effect 2: pedidos del día ────────────────────────────
+  // ─── Effect 2: pedidos del período ───────────────────────
   useEffect(() => {
     if (acceso !== true) return;
-    return subscribePedidosDia(restauranteId, fechaFiltro, setPedidos);
-  }, [restauranteId, fechaFiltro, acceso]);
+    if (vistaVentas === 'dia') return subscribePedidosDia(restauranteId, fechaFiltro, setPedidos);
+    return subscribePedidosPeriodo(restauranteId, rangoPeriodo.inicio, rangoPeriodo.fin, setPedidos);
+  }, [restauranteId, fechaFiltro, acceso, vistaVentas, rangoPeriodo]);
 
   // ─── Acciones ─────────────────────────────────────────────
   const cerrarSesion = () => logout().catch(console.error);
@@ -491,31 +536,78 @@ export default function Admin() {
 
         {/* ── Ventas ── */}
         <div className="border border-neutral-800 p-6 mt-8">
-          <div className="flex items-center justify-between mb-1">
-            <h2 className="text-amber-400 text-xs tracking-widest uppercase">Ventas</h2>
-            {!esHoy && (
-              <button onClick={() => setFechaFiltro(localDateStr())}
-                className="text-xs text-amber-400 hover:underline">
-                Volver a hoy
+          <h2 className="text-amber-400 text-xs tracking-widest uppercase mb-4">Ventas</h2>
+
+          {/* Tabs */}
+          <div className="flex border border-neutral-700 mb-4 w-fit">
+            {['dia', 'semana', 'mes'].map((v) => (
+              <button key={v} onClick={() => setVistaVentas(v)}
+                className={`px-4 py-2 text-xs tracking-widest uppercase transition-colors ${
+                  vistaVentas === v ? 'bg-amber-400 text-black font-bold' : 'text-neutral-400 hover:text-white'
+                }`}>
+                {v === 'dia' ? 'Día' : v === 'semana' ? 'Semana' : 'Mes'}
               </button>
+            ))}
+          </div>
+
+          {/* Navegación de período */}
+          <div className="flex items-center gap-3 mb-4">
+            {vistaVentas === 'dia' && (
+              <>
+                <button onClick={() => {
+                  const d = new Date(fechaFiltro + 'T12:00:00'); d.setDate(d.getDate() - 1);
+                  setFechaFiltro(localDateStr(d));
+                }} className="text-neutral-400 hover:text-white px-2 py-1 border border-neutral-700 hover:border-neutral-500">◀</button>
+                <input type="date" value={fechaFiltro} max={localDateStr()}
+                  onChange={(e) => { if (e.target.value) setFechaFiltro(e.target.value); }}
+                  className="bg-neutral-900 border border-neutral-700 px-3 py-2 text-white focus:outline-none focus:border-amber-400 text-base" />
+                <button onClick={() => {
+                  const d = new Date(fechaFiltro + 'T12:00:00'); d.setDate(d.getDate() + 1);
+                  if (localDateStr(d) <= localDateStr()) setFechaFiltro(localDateStr(d));
+                }} className="text-neutral-400 hover:text-white px-2 py-1 border border-neutral-700 hover:border-neutral-500">▶</button>
+              </>
+            )}
+            {vistaVentas === 'semana' && (
+              <>
+                <button onClick={() => {
+                  const d = new Date(semanaBase + 'T12:00:00'); d.setDate(d.getDate() - 7);
+                  setSemanaBase(localDateStr(d));
+                }} className="text-neutral-400 hover:text-white px-2 py-1 border border-neutral-700 hover:border-neutral-500">◀</button>
+                <span className="text-white text-sm">{labelPeriodo}</span>
+                <button onClick={() => {
+                  const d = new Date(semanaBase + 'T12:00:00'); d.setDate(d.getDate() + 7);
+                  if (d <= new Date()) setSemanaBase(localDateStr(d));
+                }} className="text-neutral-400 hover:text-white px-2 py-1 border border-neutral-700 hover:border-neutral-500">▶</button>
+              </>
+            )}
+            {vistaVentas === 'mes' && (
+              <>
+                <button onClick={() => {
+                  setMesBase((prev) => {
+                    const m = prev.m === 0 ? 11 : prev.m - 1;
+                    const y = prev.m === 0 ? prev.y - 1 : prev.y;
+                    return { y, m };
+                  });
+                }} className="text-neutral-400 hover:text-white px-2 py-1 border border-neutral-700 hover:border-neutral-500">◀</button>
+                <span className="text-white text-sm capitalize">{labelPeriodo}</span>
+                <button onClick={() => {
+                  setMesBase((prev) => {
+                    const ahora = new Date();
+                    if (prev.y === ahora.getFullYear() && prev.m === ahora.getMonth()) return prev;
+                    const m = prev.m === 11 ? 0 : prev.m + 1;
+                    const y = prev.m === 11 ? prev.y + 1 : prev.y;
+                    return { y, m };
+                  });
+                }} className="text-neutral-400 hover:text-white px-2 py-1 border border-neutral-700 hover:border-neutral-500">▶</button>
+              </>
             )}
           </div>
-          <div className="flex items-center gap-3 mt-3 mb-4">
-            <input
-              type="date"
-              value={fechaFiltro}
-              max={localDateStr()}
-              onChange={(e) => { if (e.target.value) setFechaFiltro(e.target.value); }}
-              className="bg-neutral-900 border border-neutral-700 px-3 py-2 text-white focus:outline-none focus:border-amber-400 text-base"
-            />
-          </div>
-          <p className="text-neutral-500 text-xs mb-6">
-            {fechaSeleccionada.toLocaleDateString('es-DO', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
-          </p>
 
           <div className="grid grid-cols-3 gap-3 mb-6">
             <div className="border border-neutral-700 p-4">
-              <p className="text-neutral-400 text-xs tracking-widest uppercase">Total</p>
+              <p className="text-neutral-400 text-xs tracking-widest uppercase">
+                {vistaVentas === 'dia' ? 'Total día' : vistaVentas === 'semana' ? 'Total semana' : 'Total mes'}
+              </p>
               <p className="text-2xl font-bold text-amber-400 mt-1">RD${totalDia}</p>
             </div>
             <div className="border border-neutral-700 p-4">
@@ -528,9 +620,27 @@ export default function Admin() {
             </div>
           </div>
 
+          {/* Desglose por día (semana/mes) */}
+          {vistaVentas !== 'dia' && desglosePorDia.length > 0 && (
+            <div className="border border-neutral-800 p-4 mb-6 space-y-2">
+              <p className="text-neutral-500 text-xs tracking-widest uppercase mb-3">Desglose por día</p>
+              {desglosePorDia.map((d, i) => (
+                <div key={i} className="flex justify-between items-center text-sm border-b border-neutral-800 pb-2 last:border-0">
+                  <span className="text-neutral-300 capitalize">
+                    {d.fecha.toLocaleDateString('es-DO', { weekday: 'short', day: 'numeric', month: 'short' })}
+                  </span>
+                  <div className="text-right">
+                    <span className="text-amber-400 font-bold">RD${d.total}</span>
+                    <span className="text-neutral-600 text-xs ml-2">{d.cantidad} pedido{d.cantidad !== 1 ? 's' : ''}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
           <div className="space-y-4">
             {pedidosReales.length === 0 && (
-              <p className="text-neutral-500 text-sm">No hay pedidos para esta fecha.</p>
+              <p className="text-neutral-500 text-sm">No hay pedidos para este período.</p>
             )}
             {[...pedidosReales]
               .sort((a, b) => (b.creadoEn?.toMillis() || 0) - (a.creadoEn?.toMillis() || 0))
