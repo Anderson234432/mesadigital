@@ -10,7 +10,7 @@ export async function verificarAccesoAdmin(restauranteId) {
   if (!snap.exists()) return { acceso: false };
   const data = snap.data();
   const acceso = uid === MAESTRO_UID || (data.adminUids || []).includes(uid);
-  return { acceso, nombre: data.nombre || '', tiempos: data.tiempos || {} };
+  return { acceso, nombre: data.nombre || '', tiempos: data.tiempos || {}, numMesas: data.numMesas || 0 };
 }
 
 export async function verificarAccesoCocina(restauranteId) {
@@ -52,6 +52,9 @@ export const eliminarRestaurante = (restauranteId) =>
 
 export const guardarTiempos = (restauranteId, tiempos) =>
   repo.actualizarRestaurante(restauranteId, { tiempos });
+
+export const guardarNumMesas = (restauranteId, numMesas) =>
+  repo.actualizarRestaurante(restauranteId, { numMesas });
 
 export const agregarUid = (restauranteId, campo, uid) =>
   repo.agregarUidRol(restauranteId, campo, uid.trim());

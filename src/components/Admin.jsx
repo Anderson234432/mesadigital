@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import { useParams } from 'react-router-dom';
 import jsPDF from 'jspdf';
 import { QRCodeCanvas } from 'qrcode.react';
-import { verificarAccesoAdmin, guardarTiempos } from '../services/restaurantesService';
+import { verificarAccesoAdmin, guardarTiempos, guardarNumMesas } from '../services/restaurantesService';
 import { subscribePlatos, guardarPlato, eliminarPlato, toggleDisponible } from '../services/platosService';
 import { subscribePedidosDia, actualizarEstadoMesa } from '../services/pedidosService';
 import { logout, getUid } from '../services/authService';
@@ -167,11 +167,12 @@ export default function Admin() {
   // ─── Effect 1: acceso + platos ────────────────────────────
   useEffect(() => {
     verificarAccesoAdmin(restauranteId)
-      .then(({ acceso: ok, nombre, tiempos }) => {
+      .then(({ acceso: ok, nombre, tiempos, numMesas }) => {
         setAcceso(ok);
         if (ok) {
           setNombreRestaurante(nombre);
           setTiemposForm(tiempos);
+          if (numMesas) setNumMesasQR(String(numMesas));
         }
       })
       .catch((e) => { console.error('Error verificando acceso admin:', e); setAcceso(false); });
@@ -620,7 +621,11 @@ export default function Admin() {
               max="50"
               placeholder="Número de mesas"
               value={numMesasQR}
-              onChange={(e) => setNumMesasQR(e.target.value)}
+              onChange={(e) => {
+                setNumMesasQR(e.target.value);
+                const n = Number(e.target.value);
+                if (n >= 1) guardarNumMesas(restauranteId, n).catch(console.error);
+              }}
               className="w-40 bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-base"
             />
             <span className="text-neutral-500 text-xs">mesas</span>
