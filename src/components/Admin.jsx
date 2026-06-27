@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useParams } from 'react-router-dom';
 import jsPDF from 'jspdf';
+import { QRCodeCanvas } from 'qrcode.react';
 import { verificarAccesoAdmin, guardarTiempos } from '../services/restaurantesService';
 import { subscribePlatos, guardarPlato, eliminarPlato, toggleDisponible } from '../services/platosService';
 import { subscribePedidosDia, actualizarEstadoMesa } from '../services/pedidosService';
@@ -35,6 +36,8 @@ export default function Admin() {
   const [mensaje, setMensaje] = useState({ texto: '', tipo: '' });
   const [confirmarEliminarId, setConfirmarEliminarId] = useState(null);
   const [confirmarCerrarMesaId, setConfirmarCerrarMesaId] = useState(null);
+  const [numMesasQR, setNumMesasQR] = useState('');
+  const [qrImprimiendo, setQrImprimiendo] = useState(null);
 
   const formVacio = {
     nombre: '', precio: '', categoria: '',
@@ -607,6 +610,43 @@ export default function Admin() {
           </button>
         </div>
 
+        {/* ── Códigos QR ── */}
+        <div className="border border-neutral-800 p-6 mt-8">
+          <h2 className="text-amber-400 text-xs tracking-widest uppercase mb-4">Códigos QR</h2>
+          <div className="flex items-center gap-3 mb-6">
+            <input
+              type="number"
+              min="1"
+              max="50"
+              placeholder="Número de mesas"
+              value={numMesasQR}
+              onChange={(e) => setNumMesasQR(e.target.value)}
+              className="w-40 bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-base"
+            />
+            <span className="text-neutral-500 text-xs">mesas</span>
+          </div>
+          <div className="flex flex-wrap gap-6">
+            {Array.from({ length: Number(numMesasQR) || 0 }, (_, i) => i + 1).map((mesa) => (
+              <div key={mesa} className="flex flex-col items-center gap-2">
+                <div className="bg-white p-3">
+                  <QRCodeCanvas
+                    value={`${window.location.origin}/restaurante/${restauranteId}/menu/${mesa}`}
+                    size={90}
+                    bgColor="#ffffff"
+                    fgColor="#000000"
+                  />
+                </div>
+                <p className="text-xs text-neutral-400">Mesa {mesa}</p>
+                <button
+                  onClick={() => setQrImprimiendo(mesa)}
+                  className="text-xs border border-neutral-700 text-neutral-400 px-3 py-1 hover:border-amber-400 hover:text-amber-400 transition-colors">
+                  Imprimir
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+
         {/* ── UID del usuario ── */}
         <div className="mt-12 border-t border-neutral-800 pt-6 pb-8 text-center">
           <p className="text-neutral-700 text-xs mb-2">Tu identificador de usuario</p>
@@ -618,6 +658,54 @@ export default function Admin() {
         </div>
 
       </div>
+
+      {/* Modal QR impresión */}
+      {qrImprimiendo && (
+        <div style={{ position: 'fixed', inset: 0, background: 'white', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
+          <button
+            type="button"
+            className="no-print"
+            onClick={() => setQrImprimiendo(null)}
+            style={{ position: 'absolute', top: 16, right: 16, background: '#333', color: 'white', border: 'none', padding: '8px 16px', cursor: 'pointer', fontSize: 13 }}>
+            ✕ Cerrar
+          </button>
+          <div style={{ padding: 48, textAlign: 'center', fontFamily: 'Georgia, serif' }}>
+            <QRCodeCanvas
+              value={`${window.location.origin}/restaurante/${restauranteId}/menu/${qrImprimiendo}`}
+              size={220}
+              bgColor="#ffffff"
+              fgColor="#000000"
+            />
+            <p style={{ marginTop: 16, fontSize: 13, color: '#666', letterSpacing: 3, textTransform: 'uppercase' }}>
+              {nombreRestaurante}
+            </p>
+            <p style={{ marginTop: 8, fontSize: 24, fontWeight: 'bold', color: '#000', letterSpacing: 4, textTransform: 'uppercase' }}>
+              Mesa {qrImprimiendo}
+            </p>
+          </div>
+          <div className="no-print" style={{ display: 'flex', gap: 12, marginTop: 16 }}>
+            <button
+              type="button"
+              onClick={() => window.print()}
+              style={{ background: '#d97706', color: '#000', border: 'none', padding: '12px 32px', fontSize: 14, cursor: 'pointer', letterSpacing: 2, textTransform: 'uppercase', fontWeight: 'bold' }}>
+              🖨️ Imprimir
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const canvas = document.querySelector('#qr-print-modal canvas');
+                if (!canvas) return;
+                const link = document.createElement('a');
+                link.download = `QR-Mesa-${qrImprimiendo}.png`;
+                link.href = canvas.toDataURL('image/png');
+                link.click();
+              }}
+              style={{ background: '#000', color: '#fff', border: 'none', padding: '12px 32px', fontSize: 14, cursor: 'pointer', letterSpacing: 2, textTransform: 'uppercase' }}>
+              ⬇ Descargar PNG
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
