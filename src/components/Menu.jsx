@@ -90,7 +90,6 @@ function Menu() {
   });
   const [carritoAbierto, setCarritoAbierto] = useState(false);
   const [nota, setNota] = useState('');
-  const [notasItems, setNotasItems] = useState({});
   const [enviando, setEnviando] = useState(false);
   const [llamandoMesero, setLlamandoMesero] = useState(false);
   const [categoriaActiva, setCategoriaActiva] = useState(null);
@@ -272,14 +271,11 @@ function Menu() {
     if (tieneComida) mensajeExito += `🍽️ Tu comida tardará aprox ${tiempoComida} min.`;
 
     // Optimistic UI — rollback en fallo
-    const carritoSnapshot = carrito.map((item) => ({
-      ...item, nota: notasItems[item.id] || '',
-    }));
+    const carritoSnapshot = [...carrito];
     const notaSnapshot = nota;
     const totalSnapshot = total;
     setCarrito([]);
     setNota('');
-    setNotasItems({});
     sessionStorage.removeItem(`carrito_${restauranteId}_${numeroMesa}`);
     setEstadoMesa('pendiente');
 
@@ -294,7 +290,7 @@ function Menu() {
       setTimeout(() => { if (montadoRef.current) setPedidoEnviado(''); }, 5000);
     } catch (e) {
       if (!montadoRef.current) return;
-      setCarrito(carritoSnapshot.map(({ nota: _n, ...rest }) => rest));
+      setCarrito(carritoSnapshot);
       setNota(notaSnapshot);
       setEstadoMesa(null);
       setError(parsearErrorPedido(e));
@@ -495,21 +491,11 @@ function Menu() {
 
           {carritoAbierto && (
             <div className="max-w-lg mx-auto px-4 pb-4">
-              <div className="space-y-3 mb-3 max-h-60 overflow-y-auto">
+              <div className="space-y-1 mb-3 max-h-40 overflow-y-auto">
                 {carritoAgrupado.map((item) => (
-                  <div key={item.id}>
-                    <div className="flex justify-between text-sm text-neutral-300">
-                      <span>{item.nombre} x{item.cantidad}</span>
-                      <span>RD${item.subtotal}</span>
-                    </div>
-                    <input
-                      type="text"
-                      value={notasItems[item.id] || ''}
-                      onChange={(e) => setNotasItems((prev) => ({ ...prev, [item.id]: e.target.value.slice(0, 100) }))}
-                      placeholder="Nota (ej: sin cebolla)..."
-                      maxLength={100}
-                      className="w-full mt-1 bg-neutral-800 border border-neutral-700 px-2 py-1 text-white placeholder-neutral-600 text-base focus:outline-none focus:border-amber-400"
-                    />
+                  <div key={item.id} className="flex justify-between text-sm text-neutral-300">
+                    <span>{item.nombre} x{item.cantidad}</span>
+                    <span>RD${item.subtotal}</span>
                   </div>
                 ))}
               </div>

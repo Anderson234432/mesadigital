@@ -66,7 +66,7 @@ export function crearPedidoDirecto(restauranteId, { mesa, carrito, total, nota, 
   const ref = doc(collection(db, 'restaurantes', restauranteId, 'pedidos'));
   batch.set(ref, {
     mesa,
-    items: carrito.map((p) => ({ nombre: p.nombre, precio: p.precio, tiempoMin: p.tiempoMin || 0, nota: p.nota || '' })),
+    items: carrito.map((p) => ({ nombre: p.nombre, precio: p.precio, tiempoMin: p.tiempoMin || 0 })),
     total,
     estado: 'pendiente',
     nota: nota.slice(0, 500),
