@@ -290,7 +290,10 @@ function Cocina() {
                       return acc;
                     }, {})
                   ).map((item, j) => (
-                    <li key={j}>{item.nombre} x{item.cantidad} — RD${item.precio * item.cantidad}</li>
+                    <li key={j}>
+                      {item.nombre} x{item.cantidad} — RD${item.precio * item.cantidad}
+                      {item.nota && <span className="block text-amber-400 text-xs ml-2">↳ {item.nota}</span>}
+                    </li>
                   ))}
                 </ul>
                 {ronda.nota && ronda.nota.trim() !== '' && (

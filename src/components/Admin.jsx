@@ -660,7 +660,10 @@ export default function Admin() {
                             return acc;
                           }, {})
                         ).map((item, i) => (
-                          <li key={i}>{item.nombre} x{item.cantidad}</li>
+                          <li key={i}>
+                            {item.nombre} x{item.cantidad}
+                            {item.nota && <span className="block text-amber-400 text-xs">↳ {item.nota}</span>}
+                          </li>
                         ))}
                       </ul>
                     </div>
