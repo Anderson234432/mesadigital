@@ -146,26 +146,44 @@ export default function Admin() {
 
   function generarCierrePDF() {
     const pdf = new jsPDF();
-    const fechaStr = fechaSeleccionada.toLocaleDateString('es-DO', {
-      weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
-    });
+    const labelVista = vistaVentas === 'dia' ? 'Día' : vistaVentas === 'semana' ? 'Semana' : 'Mes';
 
     pdf.setFontSize(20);
-    pdf.text('Cierre de Caja', 105, 18, { align: 'center' });
+    pdf.text(`Cierre de Caja — ${labelVista}`, 105, 18, { align: 'center' });
     if (nombreRestaurante) {
       pdf.setFontSize(12);
       pdf.text(nombreRestaurante, 105, 27, { align: 'center' });
     }
     pdf.setFontSize(11);
-    pdf.text(fechaStr, 105, nombreRestaurante ? 35 : 27, { align: 'center' });
+    pdf.text(labelPeriodo, 105, nombreRestaurante ? 35 : 27, { align: 'center' });
     pdf.line(15, nombreRestaurante ? 40 : 32, 195, nombreRestaurante ? 40 : 32);
 
     pdf.setFontSize(13);
     const yBase = nombreRestaurante ? 50 : 42;
-    pdf.text(`Total del día: RD$${totalDia}`, 15, yBase);
+    const labelTotal = vistaVentas === 'dia' ? 'Total del día' : vistaVentas === 'semana' ? 'Total de la semana' : 'Total del mes';
+    pdf.text(`${labelTotal}: RD$${totalDia}`, 15, yBase);
     pdf.text(`Pedidos: ${pedidosReales.length}  |  Promedio: RD$${ticketPromedio}`, 15, yBase + 8);
     pdf.line(15, yBase + 13, 195, yBase + 13);
 
+    let y = yBase + 21;
+
+    // Desglose por día (solo semana/mes)
+    if (vistaVentas !== 'dia' && desglosePorDia.length > 0) {
+      pdf.setFontSize(12);
+      pdf.text('Desglose por día:', 15, y);
+      y += 7;
+      pdf.setFontSize(10);
+      desglosePorDia.forEach((d) => {
+        if (y > 270) { pdf.addPage(); y = 15; }
+        const label = d.fecha.toLocaleDateString('es-DO', { weekday: 'short', day: 'numeric', month: 'short' });
+        pdf.text(`${label} — ${d.cantidad} pedido(s) — RD$${d.total}`, 18, y);
+        y += 6;
+      });
+      pdf.line(15, y, 195, y);
+      y += 8;
+    }
+
+    // Platos más pedidos
     const conteo = {};
     pedidosReales.forEach((p) => {
       (p.items || []).forEach((item) => {
@@ -175,27 +193,33 @@ export default function Admin() {
     });
     const ranking = Object.entries(conteo).sort((a, b) => b[1] - a[1]).slice(0, 10);
 
-    const yRanking = yBase + 21;
     pdf.setFontSize(12);
-    pdf.text('Platos más pedidos:', 15, yRanking);
+    pdf.text('Platos más pedidos:', 15, y);
+    y += 7;
     pdf.setFontSize(10);
     ranking.forEach(([nombre, cantidad], i) => {
-      pdf.text(`${i + 1}. ${nombre} — ${cantidad} ${cantidad === 1 ? 'vez' : 'veces'}`, 20, yRanking + 8 + i * 8);
+      if (y > 270) { pdf.addPage(); y = 15; }
+      pdf.text(`${i + 1}. ${nombre} — ${cantidad} ${cantidad === 1 ? 'vez' : 'veces'}`, 20, y);
+      y += 7;
     });
 
-    const offsetDetalle = yRanking + 12 + ranking.length * 8;
-    pdf.line(15, offsetDetalle, 195, offsetDetalle);
+    pdf.line(15, y, 195, y);
+    y += 8;
     pdf.setFontSize(12);
-    pdf.text('Detalle de pedidos:', 15, offsetDetalle + 8);
+    pdf.text('Detalle de pedidos:', 15, y);
+    y += 8;
     pdf.setFontSize(9);
 
-    let y = offsetDetalle + 16;
     [...pedidosReales]
       .sort((a, b) => (a.creadoEn?.toMillis() || 0) - (b.creadoEn?.toMillis() || 0))
       .forEach((p) => {
         if (y > 270) { pdf.addPage(); y = 15; }
-        const hora = p.creadoEn?.toDate().toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit' });
-        pdf.text(`Mesa ${p.mesa} — ${hora} — RD$${p.total}`, 15, y);
+        const fecha = p.creadoEn?.toDate();
+        const horaStr = fecha?.toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit' });
+        const diaStr = vistaVentas !== 'dia'
+          ? fecha?.toLocaleDateString('es-DO', { weekday: 'short', day: 'numeric', month: 'short' }) + ' '
+          : '';
+        pdf.text(`Mesa ${p.mesa} — ${diaStr}${horaStr} — RD$${p.total}`, 15, y);
         y += 6;
         (p.items || []).forEach((item) => {
           if (y > 270) { pdf.addPage(); y = 15; }
@@ -205,7 +229,8 @@ export default function Admin() {
         y += 2;
       });
 
-    pdf.save(`cierre-${fechaFiltro}.pdf`);
+    const fileLabel = vistaVentas === 'dia' ? fechaFiltro : labelPeriodo.replace(/[^a-zA-Z0-9\-]/g, '_');
+    pdf.save(`cierre-${vistaVentas}-${fileLabel}.pdf`);
   }
 
   // ─── Effect 1: acceso + platos ────────────────────────────
@@ -717,7 +742,7 @@ export default function Admin() {
           <button
             onClick={generarCierrePDF}
             className="mt-6 bg-amber-400 text-black px-6 py-2 font-bold hover:bg-amber-300 transition-colors w-full">
-            ⬇ Descargar cierre de caja PDF
+            ⬇ Cierre de caja — {vistaVentas === 'dia' ? 'Día' : vistaVentas === 'semana' ? 'Semana' : 'Mes'}
           </button>
         </div>
 
