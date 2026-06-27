@@ -80,7 +80,8 @@ export function subscribePedidosPeriodo(restauranteId, inicio, fin, cb) {
   return pedidosRepo.subscribePedidosFecha(
     restauranteId, inicio, fin,
     cb,
-    (err) => console.error('subscribePedidosPeriodo:', err)
+    (err) => console.error('subscribePedidosPeriodo:', err),
+    500
   );
 }
 

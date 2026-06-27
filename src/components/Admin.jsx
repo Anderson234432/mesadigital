@@ -563,6 +563,13 @@ export default function Admin() {
         <div className="border border-neutral-800 p-6 mt-8">
           <h2 className="text-amber-400 text-xs tracking-widest uppercase mb-4">Ventas</h2>
 
+          {/* Aviso de límite de datos */}
+          {vistaVentas !== 'dia' && pedidos.length >= 500 && (
+            <div className="border border-amber-400 text-amber-400 text-xs px-3 py-2 mb-4">
+              ⚠ Se muestran los 500 pedidos más recientes. Los totales pueden estar incompletos.
+            </div>
+          )}
+
           {/* Tabs */}
           <div className="flex border border-neutral-700 mb-4 w-fit">
             {['dia', 'semana', 'mes'].map((v) => (

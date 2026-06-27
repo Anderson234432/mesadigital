@@ -66,9 +66,10 @@ function Menu() {
     if (stored) {
       sessionStart.current = Number(stored);
     } else {
-      const now = Date.now();
-      sessionStorage.setItem(key, String(now));
-      sessionStart.current = now;
+      // 5s buffer: serverTimestamp puede estar ligeramente por delante del reloj del cliente
+      const ts = Date.now() - 5000;
+      sessionStorage.setItem(key, String(ts));
+      sessionStart.current = ts;
     }
   }
 
