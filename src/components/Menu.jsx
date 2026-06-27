@@ -7,7 +7,6 @@ import {
   enviarPedido as enviarPedidoService,
   llamarMesero as llamarMeseroService,
   subscribePedidosPorUid,
-  subscribePedidosPorMesa,
   parsearErrorPedido,
   reconectarFirestore,
   leerPedidosMesa,
@@ -120,7 +119,7 @@ function Menu() {
         if (montadoRef.current) setAuthReady(true);
       })
       .catch((e) => {
-        console.warn('Auth anónima no disponible, continuando sin UID:', e.code);
+        console.error('Auth anónima fallida, sin seguimiento de pedido:', e.code);
         if (montadoRef.current) setAuthReady(true);
       });
   }, []);
@@ -220,9 +219,11 @@ function Menu() {
         if (montadoRef.current) retryTimerRef.current = setTimeout(subscribe, 3000);
       };
 
-      subsRef.current.miMesa = clienteUidRef.current
-        ? subscribePedidosPorUid(restauranteId, clienteUidRef.current, procesarPedidos, onError)
-        : subscribePedidosPorMesa(restauranteId, numeroMesa, procesarPedidos, onError);
+      // Sin UID (auth falló) no hay suscripción — Firestore denegaría cualquier query
+      if (!clienteUidRef.current) return;
+      subsRef.current.miMesa = subscribePedidosPorUid(
+        restauranteId, clienteUidRef.current, procesarPedidos, onError
+      );
     }
 
     resubscribeRef.current = subscribe;
@@ -231,7 +232,7 @@ function Menu() {
     // Polling cada 30s como red de seguridad cuando onSnapshot se queda mudo
     pollTimerRef.current = setInterval(() => {
       if (document.visibilityState !== 'visible') return;
-      leerPedidosMesa(restauranteId, clienteUidRef.current, numeroMesa)
+      leerPedidosMesa(restauranteId, clienteUidRef.current)
         .then((datos) => { if (montadoRef.current) procesarPedidos(datos); })
         .catch(() => {});
     }, 30000);

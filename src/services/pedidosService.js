@@ -23,10 +23,9 @@ async function withBackoff(fn) {
 // ─── Reconexión y lectura puntual (polling móvil) ────────
 export const reconectarFirestore = () => pedidosRepo.reconectarFirestore();
 
-export function leerPedidosMesa(restauranteId, clienteUid, numeroMesa) {
-  return clienteUid
-    ? pedidosRepo.getPedidosPorUid(restauranteId, clienteUid)
-    : pedidosRepo.getPedidosPorMesa(restauranteId, numeroMesa);
+export function leerPedidosMesa(restauranteId, clienteUid) {
+  if (!clienteUid) return Promise.resolve([]);
+  return pedidosRepo.getPedidosPorUid(restauranteId, clienteUid);
 }
 
 // ─── Envío de pedido (Cloud Function + fallback directo) ──
