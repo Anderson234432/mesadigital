@@ -576,7 +576,7 @@ export default function Admin() {
           </div>
 
           {/* Navegación de período */}
-          <div className="flex items-center gap-3 mb-4">
+          <div className="flex flex-wrap items-center gap-2 mb-4">
             {vistaVentas === 'dia' && (
               <>
                 <button onClick={() => {
@@ -585,7 +585,7 @@ export default function Admin() {
                 }} className="text-neutral-400 hover:text-white px-2 py-1 border border-neutral-700 hover:border-neutral-500">◀</button>
                 <input type="date" value={fechaFiltro} max={localDateStr()}
                   onChange={(e) => { if (e.target.value) setFechaFiltro(e.target.value); }}
-                  className="bg-neutral-900 border border-neutral-700 px-3 py-2 text-white focus:outline-none focus:border-amber-400 text-base" />
+                  className="flex-1 min-w-0 bg-neutral-900 border border-neutral-700 px-3 py-2 text-white focus:outline-none focus:border-amber-400 text-base" />
                 <button onClick={() => {
                   const d = new Date(fechaFiltro + 'T12:00:00'); d.setDate(d.getDate() + 1);
                   if (localDateStr(d) <= localDateStr()) setFechaFiltro(localDateStr(d));

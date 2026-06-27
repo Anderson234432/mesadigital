@@ -221,12 +221,12 @@ function Cocina() {
     <div className="min-h-screen bg-neutral-950 text-white font-serif">
 
       {/* Header */}
-      <div className="bg-neutral-900 border-b border-neutral-800 px-6 py-4 flex justify-between items-center">
-        <div>
+      <div className="bg-neutral-900 border-b border-neutral-800 px-4 py-4 flex justify-between items-start gap-2">
+        <div className="shrink-0">
           <p className="text-amber-400 text-xs tracking-widest uppercase">Panel de</p>
           <h1 className="text-2xl font-bold">Cocina</h1>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap justify-end gap-2">
           <button
             onClick={sonidoActivo ? () => setSonidoActivo(false) : activarSonido}
             className={`text-xs border px-3 py-2 transition-colors min-h-[44px] ${
@@ -234,11 +234,11 @@ function Cocina() {
                 ? 'border-amber-400 text-amber-400 hover:border-neutral-600 hover:text-neutral-400'
                 : 'border-neutral-600 text-neutral-500 hover:border-amber-400 hover:text-amber-400'
             }`}>
-            {sonidoActivo ? '🔔 Sonido ON' : '🔕 Activar sonido'}
+            {sonidoActivo ? '🔔 Sonido' : '🔕 Sonido'}
           </button>
           <button onClick={cerrarSesion}
             className="text-xs border border-neutral-600 text-neutral-400 px-3 py-2 hover:border-red-400 hover:text-red-400 transition-colors min-h-[44px]">
-            Cerrar sesión
+            Salir
           </button>
         </div>
       </div>
