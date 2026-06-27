@@ -13,6 +13,7 @@ function Cocina() {
   const [pedidos, setPedidos] = useState([]);
   const [platos, setPlatos] = useState([]);
   const [disponibilidadAbierta, setDisponibilidadAbierta] = useState(false);
+  const [busquedaPlatos, setBusquedaPlatos] = useState('');
   const [sonidoActivo, setSonidoActivo] = useState(false);
   const pedidosVistos = useRef(null);
   const [ahora, setAhora] = useState(Date.now());
@@ -344,10 +345,23 @@ function Cocina() {
           </button>
           {disponibilidadAbierta && (
             <div className="border-t border-neutral-800 divide-y divide-neutral-800">
+              <div className="px-4 py-3">
+                <input
+                  type="search"
+                  value={busquedaPlatos}
+                  onChange={(e) => setBusquedaPlatos(e.target.value)}
+                  placeholder="Buscar plato..."
+                  className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 text-base focus:outline-none focus:border-amber-400"
+                />
+              </div>
               {platos.length === 0 && (
                 <p className="text-neutral-600 text-sm px-4 py-4">Sin platos cargados.</p>
               )}
               {[...platos]
+                .filter((p) => {
+                  const q = busquedaPlatos.trim().toLowerCase();
+                  return !q || p.nombre?.toLowerCase().includes(q) || p.categoria?.toLowerCase().includes(q);
+                })
                 .sort((a, b) => (a.categoria || '').localeCompare(b.categoria || '') || (a.orden ?? 999) - (b.orden ?? 999))
                 .map((p) => {
                   const disponible = p.disponible !== false;
