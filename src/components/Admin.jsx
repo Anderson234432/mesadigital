@@ -664,13 +664,13 @@ export default function Admin() {
         <div style={{ position: 'fixed', inset: 0, background: 'white', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
           <button
             type="button"
-            className="no-print"
             onClick={() => setQrImprimiendo(null)}
             style={{ position: 'absolute', top: 16, right: 16, background: '#333', color: 'white', border: 'none', padding: '8px 16px', cursor: 'pointer', fontSize: 13 }}>
             ✕ Cerrar
           </button>
-          <div style={{ padding: 48, textAlign: 'center', fontFamily: 'Georgia, serif' }}>
+          <div id="qr-modal-content" style={{ padding: 48, textAlign: 'center', fontFamily: 'Georgia, serif' }}>
             <QRCodeCanvas
+              id="qr-canvas"
               value={`${window.location.origin}/restaurante/${restauranteId}/menu/${qrImprimiendo}`}
               size={220}
               bgColor="#ffffff"
@@ -683,17 +683,31 @@ export default function Admin() {
               Mesa {qrImprimiendo}
             </p>
           </div>
-          <div className="no-print" style={{ display: 'flex', gap: 12, marginTop: 16 }}>
+          <div style={{ display: 'flex', gap: 12, marginTop: 16 }}>
             <button
               type="button"
-              onClick={() => window.print()}
+              onClick={() => {
+                const canvas = document.querySelector('#qr-modal-content canvas');
+                if (!canvas) return;
+                const url = canvas.toDataURL('image/png');
+                const ventana = window.open('', '_blank', 'width=400,height=500');
+                ventana.document.write(`
+                  <html><body style="margin:0;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:Georgia,serif;background:white">
+                    <img src="${url}" style="width:220px;height:220px"/>
+                    <p style="margin-top:16px;font-size:13px;color:#666;letter-spacing:3px;text-transform:uppercase">${nombreRestaurante}</p>
+                    <p style="margin-top:8px;font-size:24px;font-weight:bold;color:#000;letter-spacing:4px;text-transform:uppercase">Mesa ${qrImprimiendo}</p>
+                    <script>window.onload=()=>{window.print();window.onafterprint=()=>window.close()}<\/script>
+                  </body></html>
+                `);
+                ventana.document.close();
+              }}
               style={{ background: '#d97706', color: '#000', border: 'none', padding: '12px 32px', fontSize: 14, cursor: 'pointer', letterSpacing: 2, textTransform: 'uppercase', fontWeight: 'bold' }}>
               🖨️ Imprimir
             </button>
             <button
               type="button"
               onClick={() => {
-                const canvas = document.querySelector('#qr-print-modal canvas');
+                const canvas = document.querySelector('#qr-modal-content canvas');
                 if (!canvas) return;
                 const link = document.createElement('a');
                 link.download = `QR-Mesa-${qrImprimiendo}.png`;

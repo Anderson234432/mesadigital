@@ -300,10 +300,24 @@ function PanelMaestro() {
               Mesa {qrImprimiendo.mesa}
             </p>
           </div>
-          <div className="no-print" style={{ display: 'flex', gap: 12, marginTop: 16 }}>
+          <div style={{ display: 'flex', gap: 12, marginTop: 16 }}>
             <button
               type="button"
-              onClick={() => window.print()}
+              onClick={() => {
+                const canvas = document.querySelector('#print-area canvas');
+                if (!canvas) return;
+                const url = canvas.toDataURL('image/png');
+                const ventana = window.open('', '_blank', 'width=400,height=500');
+                ventana.document.write(`
+                  <html><body style="margin:0;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:Georgia,serif;background:white">
+                    <img src="${url}" style="width:220px;height:220px"/>
+                    <p style="margin-top:16px;font-size:13px;color:#666;letter-spacing:3px;text-transform:uppercase">${qrImprimiendo.nombreRestaurante}</p>
+                    <p style="margin-top:8px;font-size:24px;font-weight:bold;color:#000;letter-spacing:4px;text-transform:uppercase">Mesa ${qrImprimiendo.mesa}</p>
+                    <script>window.onload=()=>{window.print();window.onafterprint=()=>window.close()}<\/script>
+                  </body></html>
+                `);
+                ventana.document.close();
+              }}
               style={{ background: '#d97706', color: '#000', border: 'none', padding: '12px 32px', fontSize: 14, cursor: 'pointer', letterSpacing: 2, textTransform: 'uppercase', fontWeight: 'bold' }}>
               🖨️ Imprimir
             </button>
