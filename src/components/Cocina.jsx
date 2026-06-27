@@ -10,6 +10,7 @@ function Cocina() {
   // ─── Estado ───────────────────────────────────────────────
   const [acceso, setAcceso] = useState(null); // null=cargando, true=ok, false=denegado
   const [pedidos, setPedidos] = useState([]);
+  const [sonidoActivo, setSonidoActivo] = useState(false);
   const pedidosVistos = useRef(null);
   const [ahora, setAhora] = useState(Date.now());
   const audioContextRef = useRef(null);
@@ -44,20 +45,38 @@ function Cocina() {
   }, []);
 
   // ─── Sonido ───────────────────────────────────────────────
-  function reproducirSonido() {
+  function activarSonido() {
     try {
       if (!audioContextRef.current) audioContextRef.current = new AudioContext();
+      if (audioContextRef.current.state === 'suspended') audioContextRef.current.resume();
+      setSonidoActivo(true);
+      tocarBip(audioContextRef.current, 0);
+    } catch (e) {
+      console.error('Error activando sonido:', e);
+    }
+  }
+
+  function tocarBip(ctx, delay) {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.frequency.value = 880;
+    osc.type = 'sine';
+    gain.gain.setValueAtTime(0, ctx.currentTime + delay);
+    gain.gain.linearRampToValueAtTime(1, ctx.currentTime + delay + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + delay + 0.3);
+    osc.start(ctx.currentTime + delay);
+    osc.stop(ctx.currentTime + delay + 0.3);
+  }
+
+  function reproducirSonido(esLlamada = false) {
+    if (!sonidoActivo) return;
+    try {
       const ctx = audioContextRef.current;
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.frequency.value = 800;
-      osc.type = 'sine';
-      gain.gain.setValueAtTime(1, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
-      osc.start(ctx.currentTime);
-      osc.stop(ctx.currentTime + 0.5);
+      if (!ctx || ctx.state === 'suspended') return;
+      const bips = esLlamada ? 2 : 3;
+      for (let i = 0; i < bips; i++) tocarBip(ctx, i * 0.35);
     } catch (e) {
       console.error('Error reproduciendo sonido:', e);
     }
@@ -102,7 +121,10 @@ function Cocina() {
       : pedidos.filter((p) => !pedidosVistos.current.has(p.id));
 
     if (nuevos.length > 0) {
-      reproducirSonido();
+      const tieneLlamada = nuevos.some((p) => p.tipo === 'llamada');
+      const tienePedido = nuevos.some((p) => p.tipo !== 'llamada');
+      if (tienePedido) reproducirSonido(false);
+      else if (tieneLlamada) reproducirSonido(true);
       if ('Notification' in window && Notification.permission === 'granted') {
         nuevos.forEach((p) => {
           new Notification(p.tipo === 'llamada' ? '🔔 Llamada al mesero' : '🍽️ Nuevo pedido', {
@@ -194,10 +216,21 @@ function Cocina() {
           <p className="text-amber-400 text-xs tracking-widest uppercase">Panel de</p>
           <h1 className="text-2xl font-bold">Cocina</h1>
         </div>
-        <button onClick={cerrarSesion}
-          className="text-xs border border-neutral-600 text-neutral-400 px-3 py-1 hover:border-red-400 hover:text-red-400 transition-colors">
-          Cerrar sesión
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={sonidoActivo ? () => setSonidoActivo(false) : activarSonido}
+            className={`text-xs border px-3 py-2 transition-colors min-h-[44px] ${
+              sonidoActivo
+                ? 'border-amber-400 text-amber-400 hover:border-neutral-600 hover:text-neutral-400'
+                : 'border-neutral-600 text-neutral-500 hover:border-amber-400 hover:text-amber-400'
+            }`}>
+            {sonidoActivo ? '🔔 Sonido ON' : '🔕 Activar sonido'}
+          </button>
+          <button onClick={cerrarSesion}
+            className="text-xs border border-neutral-600 text-neutral-400 px-3 py-2 hover:border-red-400 hover:text-red-400 transition-colors min-h-[44px]">
+            Cerrar sesión
+          </button>
+        </div>
       </div>
 
       {/* Pedidos */}
