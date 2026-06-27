@@ -4,6 +4,7 @@ import { login, recuperarPassword } from '../services/authService';
 function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [verPassword, setVerPassword] = useState(false);
   const [error, setError] = useState('');
   const [cargando, setCargando] = useState(false);
   const [recuperado, setRecuperado] = useState(false);
@@ -70,14 +71,22 @@ function Login() {
               autoComplete="email"
               className="w-full bg-neutral-900 border border-neutral-700 px-3 py-3 text-base text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400"
             />
-            <input
-              type="password"
-              placeholder="Contraseña"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              autoComplete="current-password"
-              className="w-full bg-neutral-900 border border-neutral-700 px-3 py-3 text-base text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400"
-            />
+            <div className="relative">
+              <input
+                type={verPassword ? 'text' : 'password'}
+                placeholder="Contraseña"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoComplete="current-password"
+                className="w-full bg-neutral-900 border border-neutral-700 px-3 py-3 pr-12 text-base text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400"
+              />
+              <button
+                type="button"
+                onClick={() => setVerPassword((v) => !v)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-white hover:text-amber-400 transition-colors text-sm select-none">
+                {verPassword ? '🙈' : '👁'}
+              </button>
+            </div>
             {error && <p className="text-red-400 text-sm">{error}</p>}
             <button type="submit" disabled={cargando}
               className="w-full bg-amber-400 text-black py-3 font-bold hover:bg-amber-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
