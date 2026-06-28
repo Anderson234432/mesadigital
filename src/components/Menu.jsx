@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback, memo } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import { loginAnonimo } from '../services/authService';
 import { subscribeRestaurante } from '../services/restaurantesService';
 import { subscribePlatos } from '../services/platosService';
@@ -73,7 +73,11 @@ function Menu() {
     }
   }
 
+  const [searchParams] = useSearchParams();
+  const tokenUrl = searchParams.get('t');
+
   const [authReady, setAuthReady] = useState(false);
+  const [tokenValido, setTokenValido] = useState(null);
   const clienteUidRef = useRef(null);
 
   const [restaurante, setRestaurante] = useState(null);
@@ -207,6 +211,11 @@ function Menu() {
 
     const unsubRestaurante = subscribeRestaurante(restauranteId, (data) => {
       if (!montadoRef.current) return;
+      if (data.mesaTokens) {
+        setTokenValido(data.mesaTokens[numeroMesa] === tokenUrl);
+      } else {
+        setTokenValido(true);
+      }
       setRestaurante(data);
       setTiemposRestaurante(data.tiempos || {});
       setMesasPendientes(Math.max(0, data.stats?.mesasPendientes || 0));
@@ -345,6 +354,17 @@ function Menu() {
   }, [llamandoMesero, restauranteId, numeroMesa]);
 
   if (!authReady) return <div className="min-h-screen bg-neutral-950" />;
+
+  if (tokenValido === false) {
+    return (
+      <div className="min-h-screen bg-neutral-950 text-white flex items-center justify-center p-8">
+        <div className="text-center max-w-sm">
+          <p className="text-5xl mb-6">⛔</p>
+          <p className="text-xl font-semibold mb-2">Accede escaneando el código QR de tu mesa</p>
+        </div>
+      </div>
+    );
+  }
 
   // ─── Vista ────────────────────────────────────────────────
   return (

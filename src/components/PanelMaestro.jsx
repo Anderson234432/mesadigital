@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { QRCodeCanvas } from 'qrcode.react';
 import {
   subscribeRestaurantes, crearRestaurante, actualizarNombre,
-  eliminarRestaurante, agregarUid, quitarUid,
+  eliminarRestaurante, agregarUid, quitarUid, guardarMesaTokens,
 } from '../services/restaurantesService';
 import { logout } from '../services/authService';
 
@@ -20,6 +20,24 @@ function PanelMaestro() {
   useEffect(() => {
     return subscribeRestaurantes(setRestaurantes);
   }, []);
+
+  // Genera tokens para mesas que no los tienen aún
+  useEffect(() => {
+    restaurantes.forEach((r) => {
+      const n = Number(mesasPor[r.id]) || 0;
+      if (!n) return;
+      const faltantes = Array.from({ length: n }, (_, i) => String(i + 1))
+        .filter((m) => !r.mesaTokens?.[m]);
+      if (faltantes.length === 0) return;
+      const nuevos = { ...(r.mesaTokens || {}) };
+      faltantes.forEach((m) => {
+        nuevos[m] = typeof crypto?.randomUUID === 'function'
+          ? crypto.randomUUID()
+          : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      });
+      guardarMesaTokens(r.id, nuevos).catch(console.error);
+    });
+  }, [mesasPor, restaurantes]);
 
   async function cerrarSesion() {
     try { await logout(); } catch (e) { console.error(e); }
@@ -256,7 +274,7 @@ function PanelMaestro() {
                   <div key={mesa} className="flex flex-col items-center gap-2">
                     <div className="bg-white p-4">
                       <QRCodeCanvas
-                        value={`${import.meta.env.VITE_BASE_URL || window.location.origin}/restaurante/${r.id}/menu/${mesa}`}
+                        value={`${import.meta.env.VITE_BASE_URL || window.location.origin}/restaurante/${r.id}/menu/${mesa}?t=${r.mesaTokens?.[String(mesa)] || ''}`}
                         size={100}
                         bgColor="#ffffff"
                         fgColor="#000000"
@@ -264,7 +282,7 @@ function PanelMaestro() {
                     </div>
                     <p className="text-xs text-neutral-400">Mesa {mesa}</p>
                     <button
-                      onClick={() => setQrImprimiendo({ restauranteId: r.id, mesa, nombreRestaurante: r.nombre })}
+                      onClick={() => setQrImprimiendo({ restauranteId: r.id, mesa, nombreRestaurante: r.nombre, token: r.mesaTokens?.[String(mesa)] || '' })}
                       className="text-xs border border-neutral-700 text-neutral-400 px-3 py-1 hover:border-amber-400 hover:text-amber-400 transition-colors">
                       Imprimir
                     </button>
@@ -288,7 +306,7 @@ function PanelMaestro() {
           </button>
           <div id="print-area" style={{ padding: 48, textAlign: 'center', fontFamily: 'Georgia, serif' }}>
             <QRCodeCanvas
-              value={`${import.meta.env.VITE_BASE_URL || window.location.origin}/restaurante/${qrImprimiendo.restauranteId}/menu/${qrImprimiendo.mesa}`}
+              value={`${import.meta.env.VITE_BASE_URL || window.location.origin}/restaurante/${qrImprimiendo.restauranteId}/menu/${qrImprimiendo.mesa}?t=${qrImprimiendo.token}`}
               size={220}
               bgColor="#ffffff"
               fgColor="#000000"

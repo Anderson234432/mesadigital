@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import { useParams } from 'react-router-dom';
 import jsPDF from 'jspdf';
 import { QRCodeCanvas } from 'qrcode.react';
-import { verificarAccesoAdmin, guardarTiempos, guardarNumMesas } from '../services/restaurantesService';
+import { verificarAccesoAdmin, guardarTiempos, guardarNumMesas, guardarMesaTokens } from '../services/restaurantesService';
 import { subscribePlatos, guardarPlato, eliminarPlato, toggleDisponible } from '../services/platosService';
 import { subscribePedidosDia, subscribePedidosPeriodo, actualizarEstadoMesa } from '../services/pedidosService';
 import { logout, getUid } from '../services/authService';
@@ -40,6 +40,7 @@ export default function Admin() {
   const [confirmarEliminarId, setConfirmarEliminarId] = useState(null);
   const [confirmarCerrarMesaId, setConfirmarCerrarMesaId] = useState(null);
   const [numMesasQR, setNumMesasQR] = useState('');
+  const [mesaTokens, setMesaTokens] = useState({});
   const [qrImprimiendo, setQrImprimiendo] = useState(null);
 
   const formVacio = {
@@ -236,11 +237,12 @@ export default function Admin() {
   // ─── Effect 1: acceso + platos ────────────────────────────
   useEffect(() => {
     verificarAccesoAdmin(restauranteId)
-      .then(({ acceso: ok, nombre, tiempos, numMesas }) => {
+      .then(({ acceso: ok, nombre, tiempos, numMesas, mesaTokens: tokens }) => {
         setAcceso(ok);
         if (ok) {
           setNombreRestaurante(nombre);
           setTiemposForm(tiempos);
+          setMesaTokens(tokens);
           if (numMesas) setNumMesasQR(String(numMesas));
         }
       })
@@ -255,6 +257,24 @@ export default function Admin() {
     if (vistaVentas === 'dia') return subscribePedidosDia(restauranteId, fechaFiltro, setPedidos);
     return subscribePedidosPeriodo(restauranteId, rangoPeriodo.inicio, rangoPeriodo.fin, setPedidos);
   }, [restauranteId, fechaFiltro, acceso, vistaVentas, rangoPeriodo]);
+
+  // ─── Effect 3: genera tokens para mesas que no los tienen ─
+  useEffect(() => {
+    if (acceso !== true || !numMesasQR) return;
+    const n = Number(numMesasQR);
+    if (!n) return;
+    const faltantes = Array.from({ length: n }, (_, i) => String(i + 1))
+      .filter((m) => !mesaTokens[m]);
+    if (faltantes.length === 0) return;
+    const nuevos = { ...mesaTokens };
+    faltantes.forEach((m) => {
+      nuevos[m] = typeof crypto?.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    });
+    setMesaTokens(nuevos);
+    guardarMesaTokens(restauranteId, nuevos).catch(console.error);
+  }, [numMesasQR, acceso, mesaTokens, restauranteId]);
 
   // ─── Acciones ─────────────────────────────────────────────
   const cerrarSesion = () => logout().catch(console.error);
@@ -777,7 +797,7 @@ export default function Admin() {
               <div key={mesa} className="flex flex-col items-center gap-2">
                 <div className="bg-white p-3">
                   <QRCodeCanvas
-                    value={`${import.meta.env.VITE_BASE_URL || window.location.origin}/restaurante/${restauranteId}/menu/${mesa}`}
+                    value={`${import.meta.env.VITE_BASE_URL || window.location.origin}/restaurante/${restauranteId}/menu/${mesa}?t=${mesaTokens[String(mesa)] || ''}`}
                     size={90}
                     bgColor="#ffffff"
                     fgColor="#000000"
@@ -818,7 +838,7 @@ export default function Admin() {
           <div id="qr-modal-content" style={{ padding: 48, textAlign: 'center', fontFamily: 'Georgia, serif' }}>
             <QRCodeCanvas
               id="qr-canvas"
-              value={`${import.meta.env.VITE_BASE_URL || window.location.origin}/restaurante/${restauranteId}/menu/${qrImprimiendo}`}
+              value={`${import.meta.env.VITE_BASE_URL || window.location.origin}/restaurante/${restauranteId}/menu/${qrImprimiendo}?t=${mesaTokens[String(qrImprimiendo)] || ''}`}
               size={220}
               bgColor="#ffffff"
               fgColor="#000000"
