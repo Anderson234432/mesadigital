@@ -29,7 +29,7 @@ export function leerPedidosMesa(restauranteId, clienteUid) {
 }
 
 // ─── Envío de pedido (Cloud Function + fallback directo) ──
-export function enviarPedido(restauranteId, { mesa, carrito, total, nota, clienteUid }) {
+export function enviarPedido(restauranteId, { mesa, carrito, total, nota, clienteUid, idempotencyKey }) {
   const itemsAgrupados = carrito.reduce((acc, item) => {
     const e = acc.find((i) => i.id === item.id);
     if (e) e.cantidad += 1;
@@ -39,7 +39,7 @@ export function enviarPedido(restauranteId, { mesa, carrito, total, nota, client
 
   async function tentarEnvio() {
     try {
-      await getCrearPedidoFn()({ restauranteId, mesa, items: itemsAgrupados, nota, clienteUid });
+      await getCrearPedidoFn()({ restauranteId, mesa, items: itemsAgrupados, nota, clienteUid, idempotencyKey });
     } catch (cfErr) {
       const cfCode = cfErr?.code || '';
       const notDeployed =
@@ -48,7 +48,7 @@ export function enviarPedido(restauranteId, { mesa, carrito, total, nota, client
         cfCode.includes('internal');
       if (!notDeployed) throw cfErr;
 
-      return pedidosRepo.crearPedidoDirecto(restauranteId, { mesa, carrito, total, nota, clienteUid });
+      return pedidosRepo.crearPedidoDirecto(restauranteId, { mesa, carrito, total, nota, clienteUid, idempotencyKey });
     }
   }
 
@@ -97,9 +97,6 @@ export function subscribePedidosHoy(restauranteId, cb, onError) {
 
 export const subscribePedidosPorUid = (restauranteId, clienteUid, cb, onError) =>
   pedidosRepo.subscribePedidosPorUid(restauranteId, clienteUid, cb, onError);
-
-export const subscribePedidosPorMesa = (restauranteId, numeroMesa, cb, onError) =>
-  pedidosRepo.subscribePedidosPorMesa(restauranteId, numeroMesa, cb, onError);
 
 // ─── Clasificación de errores ─────────────────────────────
 export function parsearErrorPedido(e) {

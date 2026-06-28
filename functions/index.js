@@ -14,8 +14,8 @@ const db = getFirestore();
  * Fetches real prices from Firestore, computes the server-side total,
  * and writes the verified pedido. The client NEVER sends prices.
  */
-exports.crearPedido = onCall({ region: 'us-central1' }, async (request) => {
-  const { restauranteId, mesa, items, nota, clienteUid } = request.data;
+exports.crearPedido = onCall({ region: 'us-central1', timeoutSeconds: 30 }, async (request) => {
+  const { restauranteId, mesa, items, nota, clienteUid, idempotencyKey } = request.data;
 
   // ── Input validation ────────────────────────────────────────────────────────
   if (!restauranteId || typeof restauranteId !== 'string') {
@@ -29,6 +29,19 @@ exports.crearPedido = onCall({ region: 'us-central1' }, async (request) => {
   }
 
   const mesaStr = mesa.trim().slice(0, 20);
+
+  // ── Idempotency: si este UUID ya procesó un pedido, devolver el existente ───
+  if (idempotencyKey && typeof idempotencyKey === 'string' && idempotencyKey.length <= 64) {
+    const existing = await db
+      .collection(`restaurantes/${restauranteId}/pedidos`)
+      .where('idempotencyKey', '==', idempotencyKey)
+      .limit(1)
+      .get();
+    if (!existing.empty) {
+      const d = existing.docs[0];
+      return { pedidoId: d.id, total: d.data().total };
+    }
+  }
 
   // ── Rate limiting: máx 5 pedidos por 60 s por UID ──────────────────────────
   const uidKey = clienteUid || request.auth?.uid;
@@ -104,6 +117,7 @@ exports.crearPedido = onCall({ region: 'us-central1' }, async (request) => {
     nota: (nota || '').slice(0, 500),
     creadoEn: FieldValue.serverTimestamp(),
     clienteUid: clienteUid || request.auth?.uid || null,
+    idempotencyKey: (idempotencyKey && typeof idempotencyKey === 'string') ? idempotencyKey : null,
   });
 
   if (isNewMesa) {
@@ -148,5 +162,52 @@ exports.limpiarUsuariosAnonimos = onSchedule(
     } while (pageToken);
 
     console.log(`Usuarios anónimos eliminados: ${deleted}`);
+  }
+);
+
+// ── Limpieza mensual de pedidos archivados (>30 días) ─────────────────────────
+// Corre cada 24 horas, borra en lotes de 400 para no superar límites de Firestore.
+// Solo toca pedidos con estado='archivado' y creadoEn > 30 días atrás.
+exports.limpiarPedidosAntiguos = onSchedule(
+  { schedule: 'every 24 hours', region: 'us-central1', timeoutSeconds: 540 },
+  async () => {
+    const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+    const { Timestamp } = require('firebase-admin/firestore');
+    const BATCH_SIZE = 400;
+
+    const restaurantesSnap = await db.collection('restaurantes').get();
+    let totalBorrados = 0;
+
+    for (const restauranteDoc of restaurantesSnap.docs) {
+      const restauranteId = restauranteDoc.id;
+      let borradosEnEstRest = 0;
+
+      // Paginar hasta no quedar pedidos viejos archivados
+      let hayMas = true;
+      while (hayMas) {
+        const snap = await db
+          .collection(`restaurantes/${restauranteId}/pedidos`)
+          .where('estado', '==', 'archivado')
+          .where('creadoEn', '<=', Timestamp.fromDate(cutoff))
+          .limit(BATCH_SIZE)
+          .get();
+
+        if (snap.empty) { hayMas = false; break; }
+
+        const batch = db.batch();
+        snap.docs.forEach((d) => batch.delete(d.ref));
+        await batch.commit();
+
+        borradosEnEstRest += snap.size;
+        if (snap.size < BATCH_SIZE) hayMas = false;
+      }
+
+      if (borradosEnEstRest > 0) {
+        console.log(`[${restauranteId}] pedidos archivados eliminados: ${borradosEnEstRest}`);
+        totalBorrados += borradosEnEstRest;
+      }
+    }
+
+    console.log(`Limpieza completada. Total pedidos eliminados: ${totalBorrados}`);
   }
 );

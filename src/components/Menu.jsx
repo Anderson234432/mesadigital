@@ -106,6 +106,8 @@ function Menu() {
   const retryTimerRef = useRef(null);
   const pollTimerRef = useRef(null);
   const envioRef = useRef(false);
+  const idempotencyKeyRef = useRef(null);
+  const estadoMesaRef = useRef(null);
 
   useEffect(() => {
     montadoRef.current = true;
@@ -190,9 +192,12 @@ function Menu() {
       (p) => p.estado !== 'archivado' && (p.creadoEn?.toMillis() ?? 0) >= sessionMs
     );
     const conPedidos = todos.filter((p) => p.tipo !== 'llamada');
-    if (conPedidos.length === 0) setEstadoMesa(null);
-    else if (conPedidos.some((p) => p.estado === 'pendiente')) setEstadoMesa('pendiente');
-    else setEstadoMesa('listo');
+    let nuevoEstado = null;
+    if (conPedidos.length > 0) {
+      nuevoEstado = conPedidos.some((p) => p.estado === 'pendiente') ? 'pendiente' : 'listo';
+    }
+    estadoMesaRef.current = nuevoEstado;
+    setEstadoMesa(nuevoEstado);
     setPedidosMesa(conPedidos);
   }, []);
 
@@ -230,9 +235,10 @@ function Menu() {
     resubscribeRef.current = subscribe;
     subscribe();
 
-    // Polling cada 30s como red de seguridad cuando onSnapshot se queda mudo
+    // Polling cada 30s — solo cuando hay pedido pendiente, para no desperdiciar lecturas
     pollTimerRef.current = setInterval(() => {
       if (document.visibilityState !== 'visible') return;
+      if (estadoMesaRef.current !== 'pendiente') return;
       leerPedidosMesa(restauranteId, clienteUidRef.current)
         .then((datos) => { if (montadoRef.current) procesarPedidos(datos); })
         .catch(() => {});
@@ -277,6 +283,9 @@ function Menu() {
   const enviarPedido = useCallback(async () => {
     if (envioRef.current || carrito.length === 0) return;
     envioRef.current = true;
+    idempotencyKeyRef.current = typeof crypto?.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
     setEnviando(true);
     setError('');
 
@@ -304,6 +313,7 @@ function Menu() {
         mesa: numeroMesa, carrito: carritoSnapshot,
         total: totalSnapshot, nota: notaSnapshot,
         clienteUid: clienteUidRef.current,
+        idempotencyKey: idempotencyKeyRef.current,
       });
       if (!montadoRef.current) return;
       setPedidoEnviado(mensajeExito || '¡Pedido enviado!');
@@ -318,6 +328,7 @@ function Menu() {
     } finally {
       if (montadoRef.current) setEnviando(false);
       envioRef.current = false;
+      idempotencyKeyRef.current = null;
     }
   }, [carrito, nota, total, mesasPendientes, tiemposRestaurante, restauranteId, numeroMesa]);
 

@@ -51,16 +51,6 @@ export const subscribePedidosPorUid = (restauranteId, clienteUid, onChange, onEr
     onError
   );
 
-export const subscribePedidosPorMesa = (restauranteId, numeroMesa, onChange, onError) =>
-  onSnapshot(
-    query(
-      collection(db, 'restaurantes', restauranteId, 'pedidos'),
-      where('mesa', '==', numeroMesa)
-    ),
-    (snap) => onChange(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
-    onError
-  );
-
 export function crearLlamadaMesero(restauranteId, mesa, clienteUid) {
   const batch = writeBatch(db);
   const ref = doc(collection(db, 'restaurantes', restauranteId, 'pedidos'));
@@ -77,7 +67,7 @@ export function crearLlamadaMesero(restauranteId, mesa, clienteUid) {
   return batch.commit();
 }
 
-export function crearPedidoDirecto(restauranteId, { mesa, carrito, total, nota, clienteUid }) {
+export function crearPedidoDirecto(restauranteId, { mesa, carrito, total, nota, clienteUid, idempotencyKey }) {
   const batch = writeBatch(db);
   const ref = doc(collection(db, 'restaurantes', restauranteId, 'pedidos'));
   batch.set(ref, {
@@ -88,6 +78,7 @@ export function crearPedidoDirecto(restauranteId, { mesa, carrito, total, nota, 
     nota: nota.slice(0, 500),
     creadoEn: serverTimestamp(),
     clienteUid: clienteUid || null,
+    idempotencyKey: idempotencyKey || null,
   });
   return batch.commit();
 }

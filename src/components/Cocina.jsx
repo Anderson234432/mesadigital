@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import { verificarAccesoCocina } from '../services/restaurantesService';
-import { actualizarEstadoMesa, subscribePedidosHoy } from '../services/pedidosService';
+import { actualizarEstadoMesa, subscribePedidosHoy, reconectarFirestore } from '../services/pedidosService';
 import { subscribePlatos, toggleDisponible } from '../services/platosService';
 import { logout, getUid } from '../services/authService';
 
@@ -114,14 +114,21 @@ function Cocina() {
     };
   }, [restauranteId, acceso]);
 
-  // ─── Re-suscribir al volver a la pestaña (crítico en móvil) ──
+  // ─── Re-suscribir al volver a la pestaña o recuperar señal (crítico en móvil) ──
   useEffect(() => {
-    const handle = () => {
-      if (document.visibilityState !== 'visible') return;
+    async function reconectar() {
+      try { await reconectarFirestore(); } catch {}
       if (resubscribeRef.current) resubscribeRef.current();
+    }
+    const alVolver = () => {
+      if (document.visibilityState === 'visible') reconectar();
     };
-    document.addEventListener('visibilitychange', handle);
-    return () => document.removeEventListener('visibilitychange', handle);
+    document.addEventListener('visibilitychange', alVolver);
+    window.addEventListener('online', reconectar);
+    return () => {
+      document.removeEventListener('visibilitychange', alVolver);
+      window.removeEventListener('online', reconectar);
+    };
   }, []);
 
   // ─── Detectar nuevos pedidos y notificar ─────────────────
