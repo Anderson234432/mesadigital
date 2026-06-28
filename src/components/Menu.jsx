@@ -317,13 +317,19 @@ function Menu() {
     sessionStorage.removeItem(`carrito_${restauranteId}_${numeroMesa}`);
     setEstadoMesa('pendiente');
 
+    let _timeoutId;
     try {
-      await enviarPedidoService(restauranteId, {
-        mesa: numeroMesa, carrito: carritoSnapshot,
-        total: totalSnapshot, nota: notaSnapshot,
-        clienteUid: clienteUidRef.current,
-        idempotencyKey: idempotencyKeyRef.current,
-      });
+      await Promise.race([
+        enviarPedidoService(restauranteId, {
+          mesa: numeroMesa, carrito: carritoSnapshot,
+          total: totalSnapshot, nota: notaSnapshot,
+          clienteUid: clienteUidRef.current,
+          idempotencyKey: idempotencyKeyRef.current,
+        }),
+        new Promise((_, reject) => {
+          _timeoutId = setTimeout(() => reject(new Error('timeout')), 15000);
+        }),
+      ]);
       if (!montadoRef.current) return;
       setPedidoEnviado(mensajeExito || '¡Pedido enviado!');
       setTimeout(() => { if (montadoRef.current) setPedidoEnviado(''); }, 5000);
@@ -335,6 +341,7 @@ function Menu() {
       setError(parsearErrorPedido(e));
       setTimeout(() => { if (montadoRef.current) setError(''); }, 6000);
     } finally {
+      clearTimeout(_timeoutId);
       if (montadoRef.current) setEnviando(false);
       envioRef.current = false;
       idempotencyKeyRef.current = null;
