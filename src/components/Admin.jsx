@@ -777,7 +777,7 @@ export default function Admin() {
               <div key={mesa} className="flex flex-col items-center gap-2">
                 <div className="bg-white p-3">
                   <QRCodeCanvas
-                    value={`${window.location.origin}/restaurante/${restauranteId}/menu/${mesa}`}
+                    value={`${import.meta.env.VITE_BASE_URL || window.location.origin}/restaurante/${restauranteId}/menu/${mesa}`}
                     size={90}
                     bgColor="#ffffff"
                     fgColor="#000000"
@@ -818,7 +818,7 @@ export default function Admin() {
           <div id="qr-modal-content" style={{ padding: 48, textAlign: 'center', fontFamily: 'Georgia, serif' }}>
             <QRCodeCanvas
               id="qr-canvas"
-              value={`${window.location.origin}/restaurante/${restauranteId}/menu/${qrImprimiendo}`}
+              value={`${import.meta.env.VITE_BASE_URL || window.location.origin}/restaurante/${restauranteId}/menu/${qrImprimiendo}`}
               size={220}
               bgColor="#ffffff"
               fgColor="#000000"

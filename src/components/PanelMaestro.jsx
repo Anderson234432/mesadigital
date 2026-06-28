@@ -256,7 +256,7 @@ function PanelMaestro() {
                   <div key={mesa} className="flex flex-col items-center gap-2">
                     <div className="bg-white p-4">
                       <QRCodeCanvas
-                        value={`${window.location.origin}/restaurante/${r.id}/menu/${mesa}`}
+                        value={`${import.meta.env.VITE_BASE_URL || window.location.origin}/restaurante/${r.id}/menu/${mesa}`}
                         size={100}
                         bgColor="#ffffff"
                         fgColor="#000000"
@@ -288,7 +288,7 @@ function PanelMaestro() {
           </button>
           <div id="print-area" style={{ padding: 48, textAlign: 'center', fontFamily: 'Georgia, serif' }}>
             <QRCodeCanvas
-              value={`${window.location.origin}/restaurante/${qrImprimiendo.restauranteId}/menu/${qrImprimiendo.mesa}`}
+              value={`${import.meta.env.VITE_BASE_URL || window.location.origin}/restaurante/${qrImprimiendo.restauranteId}/menu/${qrImprimiendo.mesa}`}
               size={220}
               bgColor="#ffffff"
               fgColor="#000000"
