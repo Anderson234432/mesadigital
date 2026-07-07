@@ -14,8 +14,8 @@ const db = getFirestore();
  * Fetches real prices from Firestore, computes the server-side total,
  * and writes the verified pedido. The client NEVER sends prices.
  */
-exports.crearPedido = onCall({ region: 'us-central1', timeoutSeconds: 30 }, async (request) => {
-  const { restauranteId, mesa, items, nota, clienteUid, idempotencyKey } = request.data;
+exports.crearPedido = onCall({ region: 'us-central1', timeoutSeconds: 30, minInstances: 1 }, async (request) => {
+  const { restauranteId, mesa, items, nota, clienteUid, idempotencyKey, token } = request.data;
 
   // ── Input validation ────────────────────────────────────────────────────────
   if (!restauranteId || typeof restauranteId !== 'string') {
@@ -29,6 +29,15 @@ exports.crearPedido = onCall({ region: 'us-central1', timeoutSeconds: 30 }, asyn
   }
 
   const mesaStr = mesa.trim().slice(0, 20);
+
+  // ── Token de mesa: si el restaurante usa mesaTokens, debe coincidir ─────────
+  // Restaurantes sin mesaTokens (sistema no configurado) siguen funcionando
+  // sin token, para no romper compatibilidad hacia atrás.
+  const restauranteSnap = await db.doc(`restaurantes/${restauranteId}`).get();
+  const mesaTokens = restauranteSnap.data()?.mesaTokens;
+  if (mesaTokens && mesaTokens[mesaStr] !== token) {
+    throw new HttpsError('permission-denied', 'Token de mesa inválido.');
+  }
 
   // ── Idempotency: si este UUID ya procesó un pedido, devolver el existente ───
   if (idempotencyKey && typeof idempotencyKey === 'string' && idempotencyKey.length <= 64) {
@@ -64,6 +73,30 @@ exports.crearPedido = onCall({ region: 'us-central1', timeoutSeconds: 30 }, asyn
       }
     } else {
       await limitRef.set({ count: 1, windowStart: now });
+    }
+  }
+
+  // ── Rate limiting por mesa: máx 10 pedidos por 60 s ────────────────────────
+  // Complementa el límite por UID, que se evade re-autenticándose anónimo.
+  {
+    const mesaLimitRef = db.doc(`restaurantes/${restauranteId}/_ratelimits/mesa_${mesaStr}`);
+    const mesaLimitSnap = await mesaLimitRef.get();
+    const now = Date.now();
+    const windowMs = 60_000;
+    const maxRequestsMesa = 10;
+
+    if (mesaLimitSnap.exists) {
+      const { count, windowStart } = mesaLimitSnap.data();
+      if (now - windowStart < windowMs) {
+        if (count >= maxRequestsMesa) {
+          throw new HttpsError('resource-exhausted', 'Demasiados pedidos desde esta mesa. Espera un momento.');
+        }
+        await mesaLimitRef.update({ count: FieldValue.increment(1) });
+      } else {
+        await mesaLimitRef.set({ count: 1, windowStart: now });
+      }
+    } else {
+      await mesaLimitRef.set({ count: 1, windowStart: now });
     }
   }
 

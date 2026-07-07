@@ -37,6 +37,14 @@ service cloud.firestore {
       );
     }
 
+    // Si el restaurante tiene mesaTokens configurado, el token enviado debe
+    // coincidir con el de esa mesa. Restaurantes sin mesaTokens no lo exigen
+    // (compatibilidad hacia atrás).
+    function tokenDeMesaValido(restauranteId, mesa, tokenEnviado) {
+      let tokens = getRestaurante(restauranteId).get('mesaTokens', null);
+      return tokens == null || tokens[mesa] == tokenEnviado;
+    }
+
     // ── Restaurantes ───────────────────────────────────────────────────────────
 
     match /restaurantes/{restauranteId} {
@@ -87,6 +95,8 @@ service cloud.firestore {
           request.resource.data.mesa is string &&
           request.resource.data.mesa.size() > 0 &&
           request.resource.data.mesa.size() <= 20 &&
+          restauranteExiste(restauranteId) &&
+          tokenDeMesaValido(restauranteId, request.resource.data.mesa, request.resource.data.get('mesaToken', '')) &&
           request.resource.data.total is number &&
           request.resource.data.total >= 0 &&
           request.resource.data.total <= 50000 &&

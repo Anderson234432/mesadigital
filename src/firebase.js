@@ -5,6 +5,7 @@ import {
   persistentMultipleTabManager,
   memoryLocalCache,
 } from "firebase/firestore";
+import { initializeAppCheck, ReCaptchaV3Provider } from "firebase/app-check";
 import { getAuth } from "firebase/auth";
 import { getStorage } from "firebase/storage";
 
@@ -18,6 +19,21 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
+
+// App Check: solo se activa si VITE_RECAPTCHA_SITE_KEY está configurada.
+// Sin esta guarda, initializeAppCheck con site key undefined rompe la app
+// para todos los usuarios (este módulo se importa en cada carga de página).
+// Hasta que la site key exista en Vercel, la app sigue funcionando igual
+// que antes — App Check solo se activa cuando el env var está presente.
+if (import.meta.env.VITE_RECAPTCHA_SITE_KEY) {
+  if (import.meta.env.DEV) {
+    self.FIREBASE_APPCHECK_DEBUG_TOKEN = true;
+  }
+  initializeAppCheck(app, {
+    provider: new ReCaptchaV3Provider(import.meta.env.VITE_RECAPTCHA_SITE_KEY),
+    isTokenAutoRefreshEnabled: true,
+  });
+}
 
 function buildCache() {
   try {

@@ -214,7 +214,15 @@ function Menu() {
     const unsubRestaurante = subscribeRestaurante(restauranteId, (data) => {
       if (!montadoRef.current) return;
       if (data.mesaTokens) {
-        setTokenValido(data.mesaTokens[numeroMesa] === tokenUrl);
+        const valido = data.mesaTokens[numeroMesa] === tokenUrl;
+        setTokenValido(valido);
+        // Guardado en sessionStorage para que pedidosService lo lea sin
+        // prop drilling al armar el payload de crearPedido/crearPedidoDirecto.
+        if (valido) {
+          try {
+            sessionStorage.setItem(`token_${restauranteId}_${numeroMesa}`, tokenUrl);
+          } catch { /* no-op: sessionStorage no disponible */ }
+        }
       } else {
         setTokenValido(true);
       }

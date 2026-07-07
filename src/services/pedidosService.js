@@ -28,6 +28,17 @@ export function leerPedidosMesa(restauranteId, clienteUid) {
   return pedidosRepo.getPedidosPorUid(restauranteId, clienteUid);
 }
 
+// ─── Token de mesa (guardado por Menu.jsx al validar el QR) ──
+// Se lee aquí en vez de recibirlo por parámetro para evitar prop drilling
+// desde Menu.jsx a través de todas las llamadas de este servicio.
+function leerTokenMesa(restauranteId, mesa) {
+  try {
+    return sessionStorage.getItem(`token_${restauranteId}_${mesa}`) || null;
+  } catch {
+    return null;
+  }
+}
+
 // ─── Envío de pedido (Cloud Function + fallback directo) ──
 export function enviarPedido(restauranteId, { mesa, carrito, total, nota, clienteUid, idempotencyKey }) {
   const itemsAgrupados = carrito.reduce((acc, item) => {
@@ -36,10 +47,11 @@ export function enviarPedido(restauranteId, { mesa, carrito, total, nota, client
     else acc.push({ id: item.id, cantidad: 1 });
     return acc;
   }, []);
+  const token = leerTokenMesa(restauranteId, mesa);
 
   async function tentarEnvio() {
     try {
-      await getCrearPedidoFn()({ restauranteId, mesa, items: itemsAgrupados, nota, clienteUid, idempotencyKey });
+      await getCrearPedidoFn()({ restauranteId, mesa, items: itemsAgrupados, nota, clienteUid, idempotencyKey, token });
     } catch (cfErr) {
       const cfCode = cfErr?.code || '';
       const notDeployed =
@@ -48,7 +60,7 @@ export function enviarPedido(restauranteId, { mesa, carrito, total, nota, client
         cfCode.includes('internal');
       if (!notDeployed) throw cfErr;
 
-      return pedidosRepo.crearPedidoDirecto(restauranteId, { mesa, carrito, total, nota, clienteUid, idempotencyKey });
+      return pedidosRepo.crearPedidoDirecto(restauranteId, { mesa, carrito, total, nota, clienteUid, idempotencyKey, mesaToken: token });
     }
   }
 
@@ -57,7 +69,8 @@ export function enviarPedido(restauranteId, { mesa, carrito, total, nota, client
 
 // ─── Llamada al mesero ────────────────────────────────────
 export function llamarMesero(restauranteId, mesa, clienteUid) {
-  return withBackoff(() => pedidosRepo.crearLlamadaMesero(restauranteId, mesa, clienteUid));
+  const token = leerTokenMesa(restauranteId, mesa);
+  return withBackoff(() => pedidosRepo.crearLlamadaMesero(restauranteId, mesa, clienteUid, token));
 }
 
 // ─── Estado de mesas ──────────────────────────────────────

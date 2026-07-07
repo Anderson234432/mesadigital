@@ -12,12 +12,6 @@ export const getPedidosPorUid = (restauranteId, clienteUid) =>
     where('clienteUid', '==', clienteUid)
   )).then((snap) => snap.docs.map((d) => ({ id: d.id, ...d.data() })));
 
-export const getPedidosPorMesa = (restauranteId, mesa) =>
-  getDocs(query(
-    collection(db, 'restaurantes', restauranteId, 'pedidos'),
-    where('mesa', '==', mesa)
-  )).then((snap) => snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-
 export const subscribePedidosFecha = (restauranteId, inicioDia, finDia, onChange, onError, limitN = 0) =>
   onSnapshot(
     query(
@@ -51,7 +45,7 @@ export const subscribePedidosPorUid = (restauranteId, clienteUid, onChange, onEr
     onError
   );
 
-export function crearLlamadaMesero(restauranteId, mesa, clienteUid) {
+export function crearLlamadaMesero(restauranteId, mesa, clienteUid, mesaToken) {
   const batch = writeBatch(db);
   const ref = doc(collection(db, 'restaurantes', restauranteId, 'pedidos'));
   batch.set(ref, {
@@ -63,6 +57,7 @@ export function crearLlamadaMesero(restauranteId, mesa, clienteUid) {
     nota: '🔔 Mesa solicita atención',
     creadoEn: serverTimestamp(),
     clienteUid: clienteUid || null,
+    mesaToken: mesaToken || null,
   });
   return batch.commit();
 }
@@ -73,7 +68,7 @@ export function crearLlamadaMesero(restauranteId, mesa, clienteUid) {
 // a diferencia de la Cloud Function, que sí recalcula el precio server-side.
 // Las Rules de Firestore (allow create de pedidos) son la única validación de
 // precio en este camino: solo acotan el rango, no verifican precio real.
-export function crearPedidoDirecto(restauranteId, { mesa, carrito, total, nota, clienteUid, idempotencyKey }) {
+export function crearPedidoDirecto(restauranteId, { mesa, carrito, total, nota, clienteUid, idempotencyKey, mesaToken }) {
   const batch = writeBatch(db);
   const ref = doc(collection(db, 'restaurantes', restauranteId, 'pedidos'));
   batch.set(ref, {
@@ -85,6 +80,7 @@ export function crearPedidoDirecto(restauranteId, { mesa, carrito, total, nota, 
     creadoEn: serverTimestamp(),
     clienteUid: clienteUid || null,
     idempotencyKey: idempotencyKey || null,
+    mesaToken: mesaToken || null,
   });
   return batch.commit();
 }
