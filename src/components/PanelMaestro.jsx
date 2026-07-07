@@ -2,9 +2,15 @@ import { useState, useEffect } from 'react';
 import { QRCodeCanvas } from 'qrcode.react';
 import {
   subscribeRestaurantes, crearRestaurante, actualizarNombre,
-  eliminarRestaurante, agregarUid, quitarUid, guardarMesaTokens,
+  eliminarRestaurante, agregarUid, quitarUid, guardarMesaTokens, guardarNumMesas,
 } from '../services/restaurantesService';
 import { logout } from '../services/authService';
+
+function generarTokenMesa() {
+  return typeof crypto?.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
 
 function PanelMaestro() {
   const [restaurantes, setRestaurantes] = useState([]);
@@ -14,6 +20,7 @@ function PanelMaestro() {
   const [editandoId, setEditandoId] = useState(null);
   const [nombreEditar, setNombreEditar] = useState('');
   const [confirmarEliminarId, setConfirmarEliminarId] = useState(null);
+  const [confirmarRegenerarId, setConfirmarRegenerarId] = useState(null);
   const [accesoAbierto, setAccesoAbierto] = useState(null);
   const [nuevoUid, setNuevoUid] = useState({});
 
@@ -21,23 +28,40 @@ function PanelMaestro() {
     return subscribeRestaurantes(setRestaurantes);
   }, []);
 
-  // Genera tokens para mesas que no los tienen aún
+  // Número de mesas a mostrar: lo que el maestro tocó en esta sesión,
+  // o si no, lo que ya está guardado en Firestore.
+  function mesasDe(r) {
+    return mesasPor[r.id] !== undefined ? (Number(mesasPor[r.id]) || 0) : (r.numMesas || 0);
+  }
+
+  // Cuando el maestro define/cambia el número de mesas: genera tokens
+  // para las mesas nuevas y guarda mesaTokens + numMesas en Firestore.
   useEffect(() => {
     restaurantes.forEach((r) => {
+      if (mesasPor[r.id] === undefined) return; // no lo ha tocado el maestro
       const n = Number(mesasPor[r.id]) || 0;
       if (!n) return;
       const faltantes = Array.from({ length: n }, (_, i) => String(i + 1))
         .filter((m) => !r.mesaTokens?.[m]);
-      if (faltantes.length === 0) return;
+      const numMesasCambio = (r.numMesas || 0) !== n;
+      if (faltantes.length === 0 && !numMesasCambio) return;
       const nuevos = { ...(r.mesaTokens || {}) };
-      faltantes.forEach((m) => {
-        nuevos[m] = typeof crypto?.randomUUID === 'function'
-          ? crypto.randomUUID()
-          : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      });
-      guardarMesaTokens(r.id, nuevos).catch(console.error);
+      faltantes.forEach((m) => { nuevos[m] = generarTokenMesa(); });
+      const tareas = [];
+      if (faltantes.length > 0) tareas.push(guardarMesaTokens(r.id, nuevos));
+      if (numMesasCambio) tareas.push(guardarNumMesas(r.id, n));
+      Promise.all(tareas).catch(console.error);
     });
   }, [mesasPor, restaurantes]);
+
+  async function handleRegenerarTokens(r) {
+    const n = mesasDe(r);
+    if (!n) { setConfirmarRegenerarId(null); return; }
+    const nuevos = {};
+    for (let i = 1; i <= n; i++) nuevos[String(i)] = generarTokenMesa();
+    await guardarMesaTokens(r.id, nuevos);
+    setConfirmarRegenerarId(null);
+  }
 
   async function cerrarSesion() {
     try { await logout(); } catch (e) { console.error(e); }
@@ -259,6 +283,7 @@ function PanelMaestro() {
                   type="number"
                   min="1"
                   placeholder="Número de mesas"
+                  defaultValue={r.numMesas || ''}
                   className="bg-neutral-900 border border-neutral-700 px-3 py-1 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400 w-40 text-base"
                   onChange={(e) => {
                     const valor = Number(e.target.value);
@@ -266,11 +291,31 @@ function PanelMaestro() {
                   }}
                 />
                 <span className="text-neutral-500 text-xs">mesas</span>
+                {mesasDe(r) > 0 && (
+                  confirmarRegenerarId === r.id ? (
+                    <div className="flex gap-2 items-center">
+                      <span className="text-xs text-red-400">¿Regenerar QRs?</span>
+                      <button onClick={() => handleRegenerarTokens(r)}
+                        className="text-xs border border-red-400 text-red-400 px-3 py-1 transition-colors">
+                        Sí
+                      </button>
+                      <button onClick={() => setConfirmarRegenerarId(null)}
+                        className="text-xs border border-neutral-600 text-neutral-400 px-3 py-1 transition-colors">
+                        No
+                      </button>
+                    </div>
+                  ) : (
+                    <button onClick={() => setConfirmarRegenerarId(r.id)}
+                      className="text-xs border border-neutral-600 text-neutral-400 px-3 py-1 hover:border-amber-400 hover:text-amber-400 transition-colors">
+                      Regenerar QRs
+                    </button>
+                  )
+                )}
               </div>
 
               {/* QR por mesa */}
               <div className="flex flex-wrap gap-6">
-                {Array.from({ length: mesasPor[r.id] || 0 }, (_, i) => i + 1).map((mesa) => (
+                {Array.from({ length: mesasDe(r) }, (_, i) => i + 1).map((mesa) => (
                   <div key={mesa} className="flex flex-col items-center gap-2">
                     <div className="bg-white p-4">
                       <QRCodeCanvas

@@ -172,6 +172,7 @@ function Menu() {
 
   // ─── Callbacks estables para PlatoItem ───────────────────
   const agregarAlCarrito = useCallback((plato) => {
+    idempotencyKeyRef.current = null;
     setCarrito((prev) => [...prev, {
       id: plato.id, nombre: plato.nombre, precio: plato.precio,
       categoria: plato.categoria, tiempoMin: plato.tiempoMin || 0,
@@ -179,6 +180,7 @@ function Menu() {
   }, []);
 
   const quitarDelCarrito = useCallback((platoId) => {
+    idempotencyKeyRef.current = null;
     setCarrito((prev) => {
       const idx = [...prev].map((i) => i.id).lastIndexOf(platoId);
       if (idx === -1) return prev;
@@ -292,9 +294,13 @@ function Menu() {
   const enviarPedido = useCallback(async () => {
     if (envioRef.current || carrito.length === 0) return;
     envioRef.current = true;
-    idempotencyKeyRef.current = typeof crypto?.randomUUID === 'function'
-      ? crypto.randomUUID()
-      : `${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+    // Reintento tras timeout/error: conserva el UUID del intento anterior para
+    // que la Cloud Function lo detecte como duplicado en vez de crear otro pedido.
+    if (!idempotencyKeyRef.current) {
+      idempotencyKeyRef.current = typeof crypto?.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+    }
     setEnviando(true);
     setError('');
 
@@ -330,10 +336,15 @@ function Menu() {
           _timeoutId = setTimeout(() => reject(new Error('timeout')), 15000);
         }),
       ]);
+      // Éxito confirmado: el próximo envío es un pedido nuevo, no un reintento.
+      idempotencyKeyRef.current = null;
       if (!montadoRef.current) return;
       setPedidoEnviado(mensajeExito || '¡Pedido enviado!');
       setTimeout(() => { if (montadoRef.current) setPedidoEnviado(''); }, 5000);
     } catch (e) {
+      // No se resetea idempotencyKeyRef aquí: si la CF sí completó el pedido
+      // pese al timeout del cliente (cold start), el reintento debe reusar el
+      // mismo UUID para que la CF lo detecte como duplicado y no cree otro.
       if (!montadoRef.current) return;
       setCarrito(carritoSnapshot);
       setNota(notaSnapshot);
@@ -344,7 +355,6 @@ function Menu() {
       clearTimeout(_timeoutId);
       if (montadoRef.current) setEnviando(false);
       envioRef.current = false;
-      idempotencyKeyRef.current = null;
     }
   }, [carrito, nota, total, mesasPendientes, tiemposRestaurante, restauranteId, numeroMesa]);
 
@@ -567,6 +577,7 @@ function Menu() {
               />
               <div className="flex justify-between items-center border-t border-neutral-700 pt-3">
                 <button onClick={() => {
+                  idempotencyKeyRef.current = null;
                   setCarrito([]);
                   sessionStorage.removeItem(`carrito_${restauranteId}_${numeroMesa}`);
                 }} className="text-xs text-neutral-500 hover:text-red-400 transition-colors">

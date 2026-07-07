@@ -67,6 +67,12 @@ export function crearLlamadaMesero(restauranteId, mesa, clienteUid) {
   return batch.commit();
 }
 
+// Fallback de emergencia: solo se usa si la Cloud Function crearPedido no
+// responde (ver pedidosService.js). Escribe el total y los precios de items[]
+// tal como los tiene el cliente en memoria — NO los coteja contra platos/,
+// a diferencia de la Cloud Function, que sí recalcula el precio server-side.
+// Las Rules de Firestore (allow create de pedidos) son la única validación de
+// precio en este camino: solo acotan el rango, no verifican precio real.
 export function crearPedidoDirecto(restauranteId, { mesa, carrito, total, nota, clienteUid, idempotencyKey }) {
   const batch = writeBatch(db);
   const ref = doc(collection(db, 'restaurantes', restauranteId, 'pedidos'));

@@ -46,9 +46,14 @@ service cloud.firestore {
       // Solo el maestro puede crear o eliminar restaurantes
       allow create, delete: if esMaestro();
 
-      // Admins del restaurante pueden actualizar (tiempos, platos, stats, roles)
-      // El personal de cocina también puede actualizar (stats.mesasPendientes al archivar)
-      allow update: if esPersonal(restauranteId);
+      // Maestro y admins pueden actualizar cualquier campo (tiempos, roles, mesaTokens...).
+      // Cocina solo puede tocar stats (necesita actualizar stats.mesasPendientes al archivar).
+      allow update: if
+        esAdmin(restauranteId) ||
+        (
+          esPersonal(restauranteId) &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['stats'])
+        );
 
       // ── Platos ──────────────────────────────────────────────────────────────
 
@@ -72,7 +77,9 @@ service cloud.firestore {
 
         // Clientes (auth anónima requerida) pueden crear pedidos.
         // La Cloud Function es el path normal (usa Admin SDK, omite estas reglas).
-        // Este es el fallback cuando Cloud Functions no está disponible.
+        // Este es el fallback cuando Cloud Functions no está disponible: aquí es
+        // donde se rechazan pedidos con total/items fuera de rango, ya que este
+        // path no coteja precios contra platos/ (ver nota en pedidosRepository.js).
         allow create: if
           request.auth != null &&
           request.resource.data.keys().hasAll(['mesa', 'items', 'total', 'estado', 'creadoEn']) &&
@@ -82,10 +89,15 @@ service cloud.firestore {
           request.resource.data.mesa.size() <= 20 &&
           request.resource.data.total is number &&
           request.resource.data.total >= 0 &&
-          request.resource.data.total <= 100000 &&
+          request.resource.data.total <= 50000 &&
           request.resource.data.items is list &&
           request.resource.data.items.size() <= 30 &&
-          (request.resource.data.items.size() == 0 || request.resource.data.total > 0) &&
+          (
+            // "Llamar al mesero" es un pedido sin platos: items vacío y total 0.
+            request.resource.data.get('tipo', '') == 'llamada'
+              ? (request.resource.data.items.size() == 0 && request.resource.data.total == 0)
+              : (request.resource.data.items.size() > 0 && request.resource.data.total >= 1)
+          ) &&
           request.resource.data.get('nota', '') is string &&
           request.resource.data.get('nota', '').size() <= 500;
 
