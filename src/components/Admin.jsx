@@ -1,6 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useParams } from 'react-router-dom';
-import jsPDF from 'jspdf';
 import { verificarAccesoAdmin, guardarTiempos } from '../services/restaurantesService';
 import { subscribePlatos, guardarPlato, eliminarPlato, toggleDisponible } from '../services/platosService';
 import { subscribePedidosDia, subscribePedidosPeriodo, actualizarEstadoMesa } from '../services/pedidosService';
@@ -147,7 +146,11 @@ export default function Admin() {
     setTimeout(() => { if (montadoRef.current) setMensaje({ texto: '', tipo: '' }); }, 3500);
   }
 
-  function generarCierrePDF() {
+  async function generarCierrePDF() {
+    // jsPDF (y html2canvas, su dependencia) solo se descargan cuando el admin
+    // pide el cierre de caja — el cliente del menú nunca carga este código,
+    // y el admin tampoco lo descarga solo por abrir el panel.
+    const { default: jsPDF } = await import('jspdf');
     const pdf = new jsPDF();
     const labelVista = vistaVentas === 'dia' ? 'Día' : vistaVentas === 'semana' ? 'Semana' : 'Mes';
 
