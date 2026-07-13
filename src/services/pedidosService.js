@@ -54,10 +54,14 @@ export function enviarPedido(restauranteId, { mesa, carrito, total, nota, client
       await getCrearPedidoFn()({ restauranteId, mesa, items: itemsAgrupados, nota, clienteUid, idempotencyKey, token });
     } catch (cfErr) {
       const cfCode = cfErr?.code || '';
+      // 'unauthenticated' cubre el rechazo de App Check (p.ej. si el sitio no
+      // tiene VITE_RECAPTCHA_SITE_KEY configurado): sin este caso, un fallo de
+      // App Check tumba el pedido por completo en vez de usar el fallback.
       const notDeployed =
         cfCode.includes('not-found') ||
         cfCode.includes('unavailable') ||
-        cfCode.includes('internal');
+        cfCode.includes('internal') ||
+        cfCode.includes('unauthenticated');
       if (!notDeployed) throw cfErr;
 
       return pedidosRepo.crearPedidoDirecto(restauranteId, { mesa, carrito, total, nota, clienteUid, idempotencyKey, mesaToken: token });
