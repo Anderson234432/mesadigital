@@ -60,18 +60,6 @@ function Menu() {
 
   // Session isolation: one session per tab, survives refreshes, clears on tab close.
   const sessionStart = useRef(null);
-  if (sessionStart.current === null) {
-    const key = `ss_${restauranteId}_${numeroMesa}`;
-    const stored = sessionStorage.getItem(key);
-    if (stored) {
-      sessionStart.current = Number(stored);
-    } else {
-      // 5s buffer: serverTimestamp puede estar ligeramente por delante del reloj del cliente
-      const ts = Date.now() - 5000;
-      sessionStorage.setItem(key, String(ts));
-      sessionStart.current = ts;
-    }
-  }
 
   const [searchParams] = useSearchParams();
   const tokenUrl = searchParams.get('t');
@@ -115,6 +103,23 @@ function Menu() {
   useEffect(() => {
     montadoRef.current = true;
     return () => { montadoRef.current = false; };
+  }, []);
+
+  // Session isolation: se calcula una sola vez al montar (igual que la
+  // inicialización original) — no debe recalcularse si restauranteId/
+  // numeroMesa cambian sin desmontar el componente.
+  useEffect(() => {
+    const key = `ss_${restauranteId}_${numeroMesa}`;
+    const stored = sessionStorage.getItem(key);
+    if (stored) {
+      sessionStart.current = Number(stored);
+    } else {
+      // 5s buffer: serverTimestamp puede estar ligeramente por delante del reloj del cliente
+      const ts = Date.now() - 5000;
+      sessionStorage.setItem(key, String(ts));
+      sessionStart.current = ts;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Autenticación anónima
@@ -271,7 +276,7 @@ function Menu() {
   // Reconexión en móvil: visibilitychange + evento online
   useEffect(() => {
     async function reconectar() {
-      try { await reconectarFirestore(); } catch {}
+      try { await reconectarFirestore(); } catch { /* intencional: reconexión best-effort, se reintenta con el listener */ }
       if (resubscribeRef.current) resubscribeRef.current();
     }
     const alVolver = () => {

@@ -117,7 +117,7 @@ function Cocina() {
   // ─── Re-suscribir al volver a la pestaña o recuperar señal (crítico en móvil) ──
   useEffect(() => {
     async function reconectar() {
-      try { await reconectarFirestore(); } catch {}
+      try { await reconectarFirestore(); } catch { /* intencional: reconexión best-effort, se reintenta con el listener */ }
       if (resubscribeRef.current) resubscribeRef.current();
     }
     const alVolver = () => {
@@ -400,7 +400,7 @@ function Cocina() {
         <div className="mt-12 border-t border-neutral-800 pt-6 pb-8 text-center">
           <p className="text-neutral-700 text-xs mb-2">Tu identificador de usuario</p>
           <button
-            onClick={async () => { try { await navigator.clipboard.writeText(getUid() || ''); } catch {} }}
+            onClick={async () => { try { await navigator.clipboard.writeText(getUid() || ''); } catch { /* intencional: fallback silencioso si el portapapeles falla */ } }}
             className="text-neutral-600 text-xs font-mono hover:text-amber-400 transition-colors break-all">
             {getUid()}
           </button>

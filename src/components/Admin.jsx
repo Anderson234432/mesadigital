@@ -144,7 +144,7 @@ export default function Admin() {
   // ─── Helpers UI ───────────────────────────────────────────
   function mostrarMensaje(texto, tipo = 'ok') {
     setMensaje({ texto, tipo });
-    setTimeout(() => setMensaje({ texto: '', tipo: '' }), 3500);
+    setTimeout(() => { if (montadoRef.current) setMensaje({ texto: '', tipo: '' }); }, 3500);
   }
 
   function generarCierrePDF() {
@@ -232,7 +232,7 @@ export default function Admin() {
         y += 2;
       });
 
-    const fileLabel = vistaVentas === 'dia' ? fechaFiltro : labelPeriodo.replace(/[^a-zA-Z0-9\-]/g, '_');
+    const fileLabel = vistaVentas === 'dia' ? fechaFiltro : labelPeriodo.replace(/[^a-zA-Z0-9-]/g, '_');
     pdf.save(`cierre-${vistaVentas}-${fileLabel}.pdf`);
   }
 
@@ -275,6 +275,7 @@ export default function Admin() {
     setGuardando(true);
     try {
       await guardarPlato(restauranteId, form, imagen, editandoId);
+      if (!montadoRef.current) return;
       setEditandoId(null);
       setForm(formVacio);
       setImagen(null);
@@ -282,12 +283,14 @@ export default function Admin() {
       mostrarMensaje('Plato guardado correctamente.', 'ok');
     } catch (e) {
       console.error('Error guardando plato:', e);
-      mostrarMensaje(
-        e.message === 'La imagen supera los 3MB.' ? e.message : 'Error al guardar. Intenta de nuevo.',
-        'error'
-      );
+      if (montadoRef.current) {
+        mostrarMensaje(
+          e.message === 'La imagen supera los 3MB.' ? e.message : 'Error al guardar. Intenta de nuevo.',
+          'error'
+        );
+      }
     } finally {
-      setGuardando(false);
+      if (montadoRef.current) setGuardando(false);
     }
   };
 
@@ -300,19 +303,19 @@ export default function Admin() {
     try {
       const plato = platos.find((p) => p.id === id);
       await eliminarPlato(restauranteId, id, plato?.imagenUrl);
-      setConfirmarEliminarId(null);
+      if (montadoRef.current) setConfirmarEliminarId(null);
     } catch (e) {
       console.error('Error eliminando:', e);
-      mostrarMensaje('Error al eliminar el plato.', 'error');
+      if (montadoRef.current) mostrarMensaje('Error al eliminar el plato.', 'error');
     }
   };
 
   const handleGuardarTiempos = async () => {
     try {
       await guardarTiempos(restauranteId, tiemposForm);
-      mostrarMensaje('Tiempos guardados.', 'ok');
+      if (montadoRef.current) mostrarMensaje('Tiempos guardados.', 'ok');
     } catch {
-      mostrarMensaje('Error al guardar tiempos.', 'error');
+      if (montadoRef.current) mostrarMensaje('Error al guardar tiempos.', 'error');
     }
   };
 
@@ -321,9 +324,9 @@ export default function Admin() {
     if (!uid) return;
     try {
       await navigator.clipboard.writeText(uid);
-      mostrarMensaje('UID copiado al portapapeles.', 'ok');
+      if (montadoRef.current) mostrarMensaje('UID copiado al portapapeles.', 'ok');
     } catch {
-      mostrarMensaje(`UID: ${uid}`, 'ok');
+      if (montadoRef.current) mostrarMensaje(`UID: ${uid}`, 'ok');
     }
   };
 

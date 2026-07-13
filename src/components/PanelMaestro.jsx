@@ -394,7 +394,7 @@ function PanelMaestro() {
                     <img src="${url}" style="width:220px;height:220px"/>
                     <p style="margin-top:16px;font-size:13px;color:#666;letter-spacing:3px;text-transform:uppercase">${qrImprimiendo.nombreRestaurante}</p>
                     <p style="margin-top:8px;font-size:24px;font-weight:bold;color:#000;letter-spacing:4px;text-transform:uppercase">Mesa ${qrImprimiendo.mesa}</p>
-                    <script>window.onload=()=>{window.print();window.onafterprint=()=>window.close()}<\/script>
+                    <script>window.onload=()=>{window.print();window.onafterprint=()=>window.close()}</script>
                   </body></html>
                 `);
                 ventana.document.close();
