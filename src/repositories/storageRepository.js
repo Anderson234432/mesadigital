@@ -1,14 +1,16 @@
-import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
-import { storage } from '../firebase';
+import { getStorageModule } from '../firebase';
 
 export async function subirArchivo(path, archivo) {
+  const { ref, uploadBytes, getDownloadURL, storage } = await getStorageModule();
   const storageRef = ref(storage, path);
   await uploadBytes(storageRef, archivo);
   return getDownloadURL(storageRef);
 }
 
-export const eliminarArchivoPorPath = (path) =>
-  deleteObject(ref(storage, path));
+export async function eliminarArchivoPorPath(path) {
+  const { ref, deleteObject, storage } = await getStorageModule();
+  return deleteObject(ref(storage, path));
+}
 
 export function extraerPathDeUrl(url) {
   try {

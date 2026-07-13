@@ -7,7 +7,6 @@ import {
 } from "firebase/firestore";
 import { initializeAppCheck, ReCaptchaV3Provider } from "firebase/app-check";
 import { getAuth } from "firebase/auth";
-import { getStorage } from "firebase/storage";
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -46,4 +45,17 @@ function buildCache() {
 
 export const db = initializeFirestore(app, { localCache: buildCache() });
 export const auth = getAuth(app);
-export const storage = getStorage(app);
+
+// Storage solo lo usa la subida de imágenes de platos (Admin) — se carga de
+// forma perezosa para que el resto de la app (menú del cliente, cocina,
+// panel maestro) no descargue el SDK de Storage sin necesitarlo.
+let _storageModulePromise = null;
+export function getStorageModule() {
+  if (!_storageModulePromise) {
+    _storageModulePromise = import("firebase/storage").then((mod) => ({
+      ...mod,
+      storage: mod.getStorage(app),
+    }));
+  }
+  return _storageModulePromise;
+}
