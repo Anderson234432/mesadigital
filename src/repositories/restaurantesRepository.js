@@ -1,5 +1,5 @@
 import {
-  collection, doc, getDoc, addDoc, updateDoc, deleteDoc,
+  collection, doc, getDoc, addDoc, updateDoc, deleteDoc, setDoc,
   onSnapshot, arrayUnion, arrayRemove,
 } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -27,3 +27,15 @@ export const agregarUidRol = (restauranteId, campo, uid) =>
 
 export const quitarUidRol = (restauranteId, campo, uid) =>
   updateDoc(doc(db, 'restaurantes', restauranteId), { [campo]: arrayRemove(uid) });
+
+// mesaTokens vive en _privado/mesaTokens (subcolección sin lectura pública),
+// no en el documento raíz — ver comentario en firestore.rules.
+export const subscribeMesaTokensPrivado = (restauranteId, onChange, onError) =>
+  onSnapshot(
+    doc(db, 'restaurantes', restauranteId, '_privado', 'mesaTokens'),
+    (snap) => onChange(snap.exists() ? (snap.data().mesaTokens || {}) : {}),
+    onError
+  );
+
+export const guardarMesaTokensPrivado = (restauranteId, mesaTokens) =>
+  setDoc(doc(db, 'restaurantes', restauranteId, '_privado', 'mesaTokens'), { mesaTokens });

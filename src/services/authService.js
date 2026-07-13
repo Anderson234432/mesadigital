@@ -10,8 +10,6 @@ export const recuperarPassword = (email) => authRepo.recuperarPassword(email);
 
 export const suscribirEstadoAuth = (cb) => authRepo.suscribirEstadoAuth(cb);
 
-export const getUsuario = () => authRepo.getUsuarioActual();
-
 export const getUid = () => authRepo.getUsuarioActual()?.uid ?? null;
 
 export const esMaestro = () => getUid() === import.meta.env.VITE_MAESTRO_UID;

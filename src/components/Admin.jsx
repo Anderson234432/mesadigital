@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useParams } from 'react-router-dom';
 import jsPDF from 'jspdf';
 import { verificarAccesoAdmin, guardarTiempos } from '../services/restaurantesService';
@@ -38,6 +38,12 @@ export default function Admin() {
   const [mensaje, setMensaje] = useState({ texto: '', tipo: '' });
   const [confirmarEliminarId, setConfirmarEliminarId] = useState(null);
   const [confirmarCerrarMesaId, setConfirmarCerrarMesaId] = useState(null);
+
+  const montadoRef = useRef(true);
+  useEffect(() => {
+    montadoRef.current = true;
+    return () => { montadoRef.current = false; };
+  }, []);
 
   const formVacio = {
     nombre: '', precio: '', categoria: '',
@@ -234,13 +240,17 @@ export default function Admin() {
   useEffect(() => {
     verificarAccesoAdmin(restauranteId)
       .then(({ acceso: ok, nombre, tiempos }) => {
+        if (!montadoRef.current) return;
         setAcceso(ok);
         if (ok) {
           setNombreRestaurante(nombre);
           setTiemposForm(tiempos);
         }
       })
-      .catch((e) => { console.error('Error verificando acceso admin:', e); setAcceso(false); });
+      .catch((e) => {
+        console.error('Error verificando acceso admin:', e);
+        if (montadoRef.current) setAcceso(false);
+      });
 
     return subscribePlatos(restauranteId, setPlatos);
   }, [restauranteId]);
@@ -454,12 +464,12 @@ export default function Admin() {
               </div>
               <div className="flex gap-2 flex-wrap justify-end">
                 <button onClick={() => editar(p)}
-                  className="text-xs border border-neutral-600 text-neutral-400 px-3 py-1 hover:border-amber-400 hover:text-amber-400 transition-colors">
+                  className="text-xs border border-neutral-600 text-neutral-400 px-3 py-1 hover:border-amber-400 hover:text-amber-400 transition-colors min-h-[44px]">
                   Editar
                 </button>
                 <button
                   onClick={() => toggleDisponible(restauranteId, p.id, p.disponible !== false)}
-                  className={`text-xs border px-3 py-1 transition-colors ${p.disponible !== false
+                  className={`text-xs border px-3 py-1 transition-colors min-h-[44px] ${p.disponible !== false
                     ? 'border-neutral-600 text-neutral-400 hover:border-red-400 hover:text-red-400'
                     : 'border-amber-400 text-amber-400'}`}>
                   {p.disponible !== false ? 'Desactivar' : 'Activar'}
@@ -467,17 +477,17 @@ export default function Admin() {
                 {confirmarEliminarId === p.id ? (
                   <>
                     <button onClick={() => eliminar(p.id)}
-                      className="text-xs border border-red-400 text-red-400 px-3 py-1 transition-colors">
+                      className="text-xs border border-red-400 text-red-400 px-3 py-1 transition-colors min-h-[44px]">
                       ¿Confirmar?
                     </button>
                     <button onClick={() => setConfirmarEliminarId(null)}
-                      className="text-xs border border-neutral-600 text-neutral-400 px-3 py-1 transition-colors">
+                      className="text-xs border border-neutral-600 text-neutral-400 px-3 py-1 transition-colors min-h-[44px]">
                       No
                     </button>
                   </>
                 ) : (
                   <button onClick={() => setConfirmarEliminarId(p.id)}
-                    className="text-xs border border-neutral-600 text-neutral-400 px-3 py-1 hover:border-red-400 hover:text-red-400 transition-colors">
+                    className="text-xs border border-neutral-600 text-neutral-400 px-3 py-1 hover:border-red-400 hover:text-red-400 transition-colors min-h-[44px]">
                     Eliminar
                   </button>
                 )}
@@ -526,7 +536,7 @@ export default function Admin() {
                   <div className="flex gap-2 flex-wrap">
                     {mesa.estado === 'pendiente' && (
                       <button onClick={() => marcarListaMesaAdmin(mesa.ids)}
-                        className="text-xs border border-neutral-600 text-neutral-400 px-3 py-1 hover:border-amber-400 hover:text-amber-400 transition-colors">
+                        className="text-xs border border-neutral-600 text-neutral-400 px-3 py-1 hover:border-amber-400 hover:text-amber-400 transition-colors min-h-[44px]">
                         Marcar lista
                       </button>
                     )}
@@ -534,17 +544,17 @@ export default function Admin() {
                       <>
                         <button
                           onClick={() => { archivarMesaAdmin(mesa.ids); setConfirmarCerrarMesaId(null); }}
-                          className="text-xs border border-red-400 text-red-400 px-3 py-1 transition-colors">
+                          className="text-xs border border-red-400 text-red-400 px-3 py-1 transition-colors min-h-[44px]">
                           ¿Confirmar cierre?
                         </button>
                         <button onClick={() => setConfirmarCerrarMesaId(null)}
-                          className="text-xs border border-neutral-600 text-neutral-400 px-3 py-1 transition-colors">
+                          className="text-xs border border-neutral-600 text-neutral-400 px-3 py-1 transition-colors min-h-[44px]">
                           No
                         </button>
                       </>
                     ) : (
                       <button onClick={() => setConfirmarCerrarMesaId(mesa.mesa)}
-                        className="text-xs border border-neutral-600 text-neutral-400 px-3 py-1 hover:border-red-400 hover:text-red-400 transition-colors">
+                        className="text-xs border border-neutral-600 text-neutral-400 px-3 py-1 hover:border-red-400 hover:text-red-400 transition-colors min-h-[44px]">
                         Cerrar mesa
                       </button>
                     )}

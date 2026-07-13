@@ -37,11 +37,13 @@ service cloud.firestore {
       );
     }
 
-    // Si el restaurante tiene mesaTokens configurado, el token enviado debe
+    // Si el restaurante tiene mesaTokens configurado (en la subcolección privada
+    // _privado/mesaTokens, no en el documento público), el token enviado debe
     // coincidir con el de esa mesa. Restaurantes sin mesaTokens no lo exigen
     // (compatibilidad hacia atrás).
     function tokenDeMesaValido(restauranteId, mesa, tokenEnviado) {
-      let tokens = getRestaurante(restauranteId).get('mesaTokens', null);
+      let ruta = /databases/$(database)/documents/restaurantes/$(restauranteId)/_privado/mesaTokens;
+      let tokens = exists(ruta) ? get(ruta).data.get('mesaTokens', null) : null;
       return tokens == null || tokens[mesa] == tokenEnviado;
     }
 
@@ -54,7 +56,8 @@ service cloud.firestore {
       // Solo el maestro puede crear o eliminar restaurantes
       allow create, delete: if esMaestro();
 
-      // Maestro y admins pueden actualizar cualquier campo (tiempos, roles, mesaTokens...).
+      // Maestro y admins pueden actualizar cualquier campo del documento público
+      // (tiempos, roles, numMesas...). mesaTokens vive aparte, en _privado/.
       // Cocina solo puede tocar stats (necesita actualizar stats.mesasPendientes al archivar).
       allow update: if
         esAdmin(restauranteId) ||
@@ -121,6 +124,16 @@ service cloud.firestore {
       // No hay regla aquí → clientes no pueden leer ni escribir _ratelimits
       match /_ratelimits/{uid} {
         allow read, write: if false;
+      }
+
+      // ── Datos privados (mesaTokens) ───────────────────────────────────────────
+      // Firestore no soporta seguridad a nivel de campo: mesaTokens no puede vivir
+      // en el documento público de restaurantes/{id} (que tiene allow read: if true)
+      // sin quedar expuesto a cualquiera que conozca el restauranteId. Vive aquí,
+      // solo accesible por el maestro (gestiona los QR) y por la Cloud Function
+      // (que usa Admin SDK y omite Rules).
+      match /_privado/{docId} {
+        allow read, write: if esMaestro();
       }
     }
   }

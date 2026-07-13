@@ -1,6 +1,7 @@
 import {
   collection, doc, query, where, orderBy, limit, Timestamp,
   onSnapshot, getDocs, writeBatch, serverTimestamp, increment, enableNetwork,
+  runTransaction,
 } from 'firebase/firestore';
 import { db } from '../firebase';
 
@@ -86,14 +87,28 @@ export function crearPedidoDirecto(restauranteId, { mesa, carrito, total, nota, 
 }
 
 export function actualizarEstadoPedidos(restauranteId, ids, estado) {
-  const batch = writeBatch(db);
-  ids.forEach((id) =>
-    batch.update(doc(db, 'restaurantes', restauranteId, 'pedidos', id), { estado })
-  );
-  if (estado === 'archivado') {
-    batch.update(doc(db, 'restaurantes', restauranteId), {
-      'stats.mesasPendientes': increment(-1),
-    });
+  if (estado !== 'archivado') {
+    const batch = writeBatch(db);
+    ids.forEach((id) =>
+      batch.update(doc(db, 'restaurantes', restauranteId, 'pedidos', id), { estado })
+    );
+    return batch.commit();
   }
-  return batch.commit();
+
+  // Archivar decrementa stats.mesasPendientes. Un doble tap/clic (común en
+  // móvil) puede disparar esta función dos veces para la misma mesa antes de
+  // que el listener refleje el cambio; con un batch simple eso decrementa dos
+  // veces y deja el contador negativo permanentemente. La transacción solo
+  // decrementa si algún pedido de esta tanda todavía no estaba archivado.
+  const refs = ids.map((id) => doc(db, 'restaurantes', restauranteId, 'pedidos', id));
+  return runTransaction(db, async (tx) => {
+    const snaps = await Promise.all(refs.map((ref) => tx.get(ref)));
+    const habiaActivos = snaps.some((s) => s.exists() && s.data().estado !== 'archivado');
+    refs.forEach((ref) => tx.update(ref, { estado }));
+    if (habiaActivos) {
+      tx.update(doc(db, 'restaurantes', restauranteId), {
+        'stats.mesasPendientes': increment(-1),
+      });
+    }
+  });
 }

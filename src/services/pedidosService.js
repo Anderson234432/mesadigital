@@ -125,5 +125,7 @@ export function parsearErrorPedido(e) {
   }
   if (code.includes('invalid-argument'))
     return 'Error en el pedido. Verifica tu selección e intenta de nuevo.';
+  if (code.includes('permission-denied'))
+    return 'Accede escaneando el código QR de tu mesa.';
   return 'Error al enviar el pedido. Intenta de nuevo.';
 }

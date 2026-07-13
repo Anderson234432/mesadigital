@@ -77,7 +77,6 @@ function Menu() {
   const tokenUrl = searchParams.get('t');
 
   const [authReady, setAuthReady] = useState(false);
-  const [tokenValido, setTokenValido] = useState(null);
   const clienteUidRef = useRef(null);
 
   const [restaurante, setRestaurante] = useState(null);
@@ -213,18 +212,15 @@ function Menu() {
 
     const unsubRestaurante = subscribeRestaurante(restauranteId, (data) => {
       if (!montadoRef.current) return;
-      if (data.mesaTokens) {
-        const valido = data.mesaTokens[numeroMesa] === tokenUrl;
-        setTokenValido(valido);
-        // Guardado en sessionStorage para que pedidosService lo lea sin
-        // prop drilling al armar el payload de crearPedido/crearPedidoDirecto.
-        if (valido) {
-          try {
-            sessionStorage.setItem(`token_${restauranteId}_${numeroMesa}`, tokenUrl);
-          } catch { /* no-op: sessionStorage no disponible */ }
-        }
-      } else {
-        setTokenValido(true);
+      // mesaTokens ya no es legible por el cliente (vive en _privado/mesaTokens,
+      // solo accesible por el maestro y por la Cloud Function vía Admin SDK — ver
+      // firestore.rules). El cliente guarda el token tal como llega en la URL del
+      // QR y confía en que el backend lo valide al crear el pedido; no hay forma
+      // de verificarlo de antemano sin exponer los tokens de todas las mesas.
+      if (tokenUrl) {
+        try {
+          sessionStorage.setItem(`token_${restauranteId}_${numeroMesa}`, tokenUrl);
+        } catch { /* no-op: sessionStorage no disponible */ }
       }
       setRestaurante(data);
       setTiemposRestaurante(data.tiempos || {});
@@ -270,7 +266,7 @@ function Menu() {
       unsubPlatos();
       if (subsRef.current.miMesa) subsRef.current.miMesa();
     };
-  }, [authReady, restauranteId, numeroMesa, procesarPedidos]);
+  }, [authReady, restauranteId, numeroMesa, procesarPedidos, tokenUrl]);
 
   // Reconexión en móvil: visibilitychange + evento online
   useEffect(() => {
@@ -379,17 +375,6 @@ function Menu() {
   }, [llamandoMesero, restauranteId, numeroMesa]);
 
   if (!authReady) return <div className="min-h-screen bg-neutral-950" />;
-
-  if (tokenValido === false) {
-    return (
-      <div className="min-h-screen bg-neutral-950 text-white flex items-center justify-center p-8">
-        <div className="text-center max-w-sm">
-          <p className="text-5xl mb-6">⛔</p>
-          <p className="text-xl font-semibold mb-2">Accede escaneando el código QR de tu mesa</p>
-        </div>
-      </div>
-    );
-  }
 
   // ─── Vista ────────────────────────────────────────────────
   return (

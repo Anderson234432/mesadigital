@@ -3,6 +3,7 @@ import { QRCodeCanvas } from 'qrcode.react';
 import {
   subscribeRestaurantes, crearRestaurante, actualizarNombre,
   eliminarRestaurante, agregarUid, quitarUid, guardarMesaTokens, guardarNumMesas,
+  subscribeMesaTokens,
 } from '../services/restaurantesService';
 import { logout } from '../services/authService';
 
@@ -23,10 +24,26 @@ function PanelMaestro() {
   const [confirmarRegenerarId, setConfirmarRegenerarId] = useState(null);
   const [accesoAbierto, setAccesoAbierto] = useState(null);
   const [nuevoUid, setNuevoUid] = useState({});
+  const [mesaTokensPorRestaurante, setMesaTokensPorRestaurante] = useState({});
 
   useEffect(() => {
     return subscribeRestaurantes(setRestaurantes);
   }, []);
+
+  // mesaTokens ya no viaja en el documento de restaurantes/{id} (público) —
+  // vive en _privado/mesaTokens, solo legible por el maestro. Una suscripción
+  // por restaurante visible; se re-arma solo cuando cambia el conjunto de IDs,
+  // no en cada snapshot de subscribeRestaurantes (evita re-suscribir de más).
+  const idsRestaurantes = restaurantes.map((r) => r.id).sort().join(',');
+  useEffect(() => {
+    const unsubs = restaurantes.map((r) =>
+      subscribeMesaTokens(r.id, (tokens) => {
+        setMesaTokensPorRestaurante((prev) => ({ ...prev, [r.id]: tokens }));
+      })
+    );
+    return () => unsubs.forEach((u) => u());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [idsRestaurantes]);
 
   // Número de mesas a mostrar: lo que el maestro tocó en esta sesión,
   // o si no, lo que ya está guardado en Firestore.
@@ -41,18 +58,19 @@ function PanelMaestro() {
       if (mesasPor[r.id] === undefined) return; // no lo ha tocado el maestro
       const n = Number(mesasPor[r.id]) || 0;
       if (!n) return;
+      const tokensActuales = mesaTokensPorRestaurante[r.id] || {};
       const faltantes = Array.from({ length: n }, (_, i) => String(i + 1))
-        .filter((m) => !r.mesaTokens?.[m]);
+        .filter((m) => !tokensActuales[m]);
       const numMesasCambio = (r.numMesas || 0) !== n;
       if (faltantes.length === 0 && !numMesasCambio) return;
-      const nuevos = { ...(r.mesaTokens || {}) };
+      const nuevos = { ...tokensActuales };
       faltantes.forEach((m) => { nuevos[m] = generarTokenMesa(); });
       const tareas = [];
       if (faltantes.length > 0) tareas.push(guardarMesaTokens(r.id, nuevos));
       if (numMesasCambio) tareas.push(guardarNumMesas(r.id, n));
       Promise.all(tareas).catch(console.error);
     });
-  }, [mesasPor, restaurantes]);
+  }, [mesasPor, restaurantes, mesaTokensPorRestaurante]);
 
   async function handleRegenerarTokens(r) {
     const n = mesasDe(r);
@@ -163,11 +181,11 @@ function PanelMaestro() {
                     className="flex-1 bg-neutral-900 border border-amber-400 px-3 py-1 text-white text-base focus:outline-none"
                   />
                   <button onClick={() => guardarEdicion(r.id)}
-                    className="text-xs bg-amber-400 text-black px-3 py-1 font-bold">
+                    className="text-xs bg-amber-400 text-black px-3 py-1 font-bold min-h-[44px]">
                     Guardar
                   </button>
                   <button onClick={() => setEditandoId(null)}
-                    className="text-xs border border-neutral-600 text-neutral-400 px-3 py-1">
+                    className="text-xs border border-neutral-600 text-neutral-400 px-3 py-1 min-h-[44px]">
                     Cancelar
                   </button>
                 </div>
@@ -175,24 +193,24 @@ function PanelMaestro() {
                 <div className="flex items-center gap-3 mb-1">
                   <p className="font-bold text-lg flex-1">{r.nombre}</p>
                   <button onClick={() => { setEditandoId(r.id); setNombreEditar(r.nombre); }}
-                    className="text-xs border border-neutral-600 text-neutral-400 px-3 py-1 hover:border-amber-400 hover:text-amber-400 transition-colors">
+                    className="text-xs border border-neutral-600 text-neutral-400 px-3 py-1 hover:border-amber-400 hover:text-amber-400 transition-colors min-h-[44px]">
                     Editar
                   </button>
                   {confirmarEliminarId === r.id ? (
                     <div className="flex gap-2 items-center">
                       <span className="text-xs text-red-400">¿Eliminar?</span>
                       <button onClick={() => handleEliminar(r.id)}
-                        className="text-xs border border-red-400 text-red-400 px-3 py-1 transition-colors">
+                        className="text-xs border border-red-400 text-red-400 px-3 py-1 transition-colors min-h-[44px]">
                         Sí
                       </button>
                       <button onClick={() => setConfirmarEliminarId(null)}
-                        className="text-xs border border-neutral-600 text-neutral-400 px-3 py-1 transition-colors">
+                        className="text-xs border border-neutral-600 text-neutral-400 px-3 py-1 transition-colors min-h-[44px]">
                         No
                       </button>
                     </div>
                   ) : (
                     <button onClick={() => setConfirmarEliminarId(r.id)}
-                      className="text-xs border border-neutral-600 text-neutral-400 px-3 py-1 hover:border-red-400 hover:text-red-400 transition-colors">
+                      className="text-xs border border-neutral-600 text-neutral-400 px-3 py-1 hover:border-red-400 hover:text-red-400 transition-colors min-h-[44px]">
                       Eliminar
                     </button>
                   )}
@@ -225,7 +243,7 @@ function PanelMaestro() {
                         <div key={uid} className="flex items-center justify-between mb-1">
                           <span className="text-neutral-400 text-xs font-mono truncate flex-1 mr-2">{uid}</span>
                           <button onClick={() => quitarUid(r.id, 'adminUids', uid)}
-                            className="text-xs text-red-400 hover:text-red-300 shrink-0">
+                            className="text-xs text-red-400 hover:text-red-300 shrink-0 min-h-[44px] inline-flex items-center">
                             Quitar
                           </button>
                         </div>
@@ -239,7 +257,7 @@ function PanelMaestro() {
                         className="flex-1 bg-neutral-900 border border-neutral-700 px-2 py-1 text-white text-base placeholder-neutral-600 focus:outline-none focus:border-amber-400 font-mono"
                       />
                       <button onClick={() => handleAgregarUid(r.id, 'adminUids', getNuevoUid(r.id, 'admin'))}
-                        className="text-xs bg-amber-400 text-black px-3 py-1 font-bold hover:bg-amber-300">
+                        className="text-xs bg-amber-400 text-black px-3 py-1 font-bold hover:bg-amber-300 min-h-[44px]">
                         Agregar
                       </button>
                     </div>
@@ -254,7 +272,7 @@ function PanelMaestro() {
                         <div key={uid} className="flex items-center justify-between mb-1">
                           <span className="text-neutral-400 text-xs font-mono truncate flex-1 mr-2">{uid}</span>
                           <button onClick={() => quitarUid(r.id, 'cocinaUids', uid)}
-                            className="text-xs text-red-400 hover:text-red-300 shrink-0">
+                            className="text-xs text-red-400 hover:text-red-300 shrink-0 min-h-[44px] inline-flex items-center">
                             Quitar
                           </button>
                         </div>
@@ -268,7 +286,7 @@ function PanelMaestro() {
                         className="flex-1 bg-neutral-900 border border-neutral-700 px-2 py-1 text-white text-base placeholder-neutral-600 focus:outline-none focus:border-amber-400 font-mono"
                       />
                       <button onClick={() => handleAgregarUid(r.id, 'cocinaUids', getNuevoUid(r.id, 'cocina'))}
-                        className="text-xs bg-amber-400 text-black px-3 py-1 font-bold hover:bg-amber-300">
+                        className="text-xs bg-amber-400 text-black px-3 py-1 font-bold hover:bg-amber-300 min-h-[44px]">
                         Agregar
                       </button>
                     </div>
@@ -296,17 +314,17 @@ function PanelMaestro() {
                     <div className="flex gap-2 items-center">
                       <span className="text-xs text-red-400">¿Regenerar QRs?</span>
                       <button onClick={() => handleRegenerarTokens(r)}
-                        className="text-xs border border-red-400 text-red-400 px-3 py-1 transition-colors">
+                        className="text-xs border border-red-400 text-red-400 px-3 py-1 transition-colors min-h-[44px]">
                         Sí
                       </button>
                       <button onClick={() => setConfirmarRegenerarId(null)}
-                        className="text-xs border border-neutral-600 text-neutral-400 px-3 py-1 transition-colors">
+                        className="text-xs border border-neutral-600 text-neutral-400 px-3 py-1 transition-colors min-h-[44px]">
                         No
                       </button>
                     </div>
                   ) : (
                     <button onClick={() => setConfirmarRegenerarId(r.id)}
-                      className="text-xs border border-neutral-600 text-neutral-400 px-3 py-1 hover:border-amber-400 hover:text-amber-400 transition-colors">
+                      className="text-xs border border-neutral-600 text-neutral-400 px-3 py-1 hover:border-amber-400 hover:text-amber-400 transition-colors min-h-[44px]">
                       Regenerar QRs
                     </button>
                   )
@@ -319,7 +337,7 @@ function PanelMaestro() {
                   <div key={mesa} className="flex flex-col items-center gap-2">
                     <div className="bg-white p-4">
                       <QRCodeCanvas
-                        value={`${import.meta.env.VITE_BASE_URL || window.location.origin}/restaurante/${r.id}/menu/${mesa}?t=${r.mesaTokens?.[String(mesa)] || ''}`}
+                        value={`${import.meta.env.VITE_BASE_URL || window.location.origin}/restaurante/${r.id}/menu/${mesa}?t=${mesaTokensPorRestaurante[r.id]?.[String(mesa)] || ''}`}
                         size={100}
                         bgColor="#ffffff"
                         fgColor="#000000"
@@ -327,8 +345,8 @@ function PanelMaestro() {
                     </div>
                     <p className="text-xs text-neutral-400">Mesa {mesa}</p>
                     <button
-                      onClick={() => setQrImprimiendo({ restauranteId: r.id, mesa, nombreRestaurante: r.nombre, token: r.mesaTokens?.[String(mesa)] || '' })}
-                      className="text-xs border border-neutral-700 text-neutral-400 px-3 py-1 hover:border-amber-400 hover:text-amber-400 transition-colors">
+                      onClick={() => setQrImprimiendo({ restauranteId: r.id, mesa, nombreRestaurante: r.nombre, token: mesaTokensPorRestaurante[r.id]?.[String(mesa)] || '' })}
+                      className="text-xs border border-neutral-700 text-neutral-400 px-3 py-1 hover:border-amber-400 hover:text-amber-400 transition-colors min-h-[44px]">
                       Imprimir
                     </button>
                   </div>

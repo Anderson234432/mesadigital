@@ -14,7 +14,7 @@ const db = getFirestore();
  * Fetches real prices from Firestore, computes the server-side total,
  * and writes the verified pedido. The client NEVER sends prices.
  */
-exports.crearPedido = onCall({ region: 'us-central1', timeoutSeconds: 30, minInstances: 1 }, async (request) => {
+exports.crearPedido = onCall({ region: 'us-central1', timeoutSeconds: 30, minInstances: 1, enforceAppCheck: true }, async (request) => {
   const { restauranteId, mesa, items, nota, clienteUid, idempotencyKey, token } = request.data;
 
   // ── Input validation ────────────────────────────────────────────────────────
@@ -32,75 +32,17 @@ exports.crearPedido = onCall({ region: 'us-central1', timeoutSeconds: 30, minIns
 
   // ── Token de mesa: si el restaurante usa mesaTokens, debe coincidir ─────────
   // Restaurantes sin mesaTokens (sistema no configurado) siguen funcionando
-  // sin token, para no romper compatibilidad hacia atrás.
-  const restauranteSnap = await db.doc(`restaurantes/${restauranteId}`).get();
-  const mesaTokens = restauranteSnap.data()?.mesaTokens;
+  // sin token, para no romper compatibilidad hacia atrás. mesaTokens vive en
+  // _privado/mesaTokens (no en el documento raíz, que tiene lectura pública) —
+  // ver firestore.rules.
+  const privadoSnap = await db.doc(`restaurantes/${restauranteId}/_privado/mesaTokens`).get();
+  const mesaTokens = privadoSnap.data()?.mesaTokens;
   if (mesaTokens && mesaTokens[mesaStr] !== token) {
     throw new HttpsError('permission-denied', 'Token de mesa inválido.');
   }
 
-  // ── Idempotency: si este UUID ya procesó un pedido, devolver el existente ───
-  if (idempotencyKey && typeof idempotencyKey === 'string' && idempotencyKey.length <= 64) {
-    const existing = await db
-      .collection(`restaurantes/${restauranteId}/pedidos`)
-      .where('idempotencyKey', '==', idempotencyKey)
-      .limit(1)
-      .get();
-    if (!existing.empty) {
-      const d = existing.docs[0];
-      return { pedidoId: d.id, total: d.data().total };
-    }
-  }
-
-  // ── Rate limiting: máx 5 pedidos por 60 s por UID ──────────────────────────
-  const uidKey = clienteUid || request.auth?.uid;
-  if (uidKey) {
-    const limitRef = db.doc(`restaurantes/${restauranteId}/_ratelimits/${uidKey}`);
-    const limitSnap = await limitRef.get();
-    const now = Date.now();
-    const windowMs = 60_000;
-    const maxRequests = 5;
-
-    if (limitSnap.exists) {
-      const { count, windowStart } = limitSnap.data();
-      if (now - windowStart < windowMs) {
-        if (count >= maxRequests) {
-          throw new HttpsError('resource-exhausted', 'Demasiados pedidos. Espera un momento antes de volver a pedir.');
-        }
-        await limitRef.update({ count: FieldValue.increment(1) });
-      } else {
-        await limitRef.set({ count: 1, windowStart: now });
-      }
-    } else {
-      await limitRef.set({ count: 1, windowStart: now });
-    }
-  }
-
-  // ── Rate limiting por mesa: máx 10 pedidos por 60 s ────────────────────────
-  // Complementa el límite por UID, que se evade re-autenticándose anónimo.
-  {
-    const mesaLimitRef = db.doc(`restaurantes/${restauranteId}/_ratelimits/mesa_${mesaStr}`);
-    const mesaLimitSnap = await mesaLimitRef.get();
-    const now = Date.now();
-    const windowMs = 60_000;
-    const maxRequestsMesa = 10;
-
-    if (mesaLimitSnap.exists) {
-      const { count, windowStart } = mesaLimitSnap.data();
-      if (now - windowStart < windowMs) {
-        if (count >= maxRequestsMesa) {
-          throw new HttpsError('resource-exhausted', 'Demasiados pedidos desde esta mesa. Espera un momento.');
-        }
-        await mesaLimitRef.update({ count: FieldValue.increment(1) });
-      } else {
-        await mesaLimitRef.set({ count: 1, windowStart: now });
-      }
-    } else {
-      await mesaLimitRef.set({ count: 1, windowStart: now });
-    }
-  }
-
-  // ── Fetch verified prices from server ──────────────────────────────────────
+  // ── Fetch verified prices from server (fuera de la transacción: no necesita
+  // atomicidad con lo demás, y evita cargar la transacción con hasta 30 reads) ──
   const platoSnaps = await Promise.all(
     items.map(item => db.doc(`restaurantes/${restauranteId}/platos/${item.id}`).get())
   );
@@ -128,40 +70,100 @@ exports.crearPedido = onCall({ region: 'us-central1', timeoutSeconds: 30, minIns
     }
   }
 
-  // ── Check if this is a new active mesa (for stats counter accuracy) ─────────
-  const existingPendiente = await db
+  // ── Idempotencia + rate limiting (UID y mesa) + escritura: todo en una sola
+  // transacción. Un check-then-write separado (como antes) deja una ventana
+  // donde dos requests concurrentes leen el mismo estado "aún no existe / aún
+  // no llegó al límite" antes de que ninguno escriba, y ambos pasan. La
+  // transacción serializa esto: Firestore reintenta automáticamente si detecta
+  // que otro request tocó los mismos documentos mientras esta corría.
+  // request.auth?.uid viene del token verificado por Firebase; clienteUid es
+  // dato del cliente y no debe tener prioridad, o el rate limit por UID se
+  // evade mandando un clienteUid distinto en cada request.
+  const uidKey = request.auth?.uid || clienteUid;
+  const idempotencyQuery = (idempotencyKey && typeof idempotencyKey === 'string' && idempotencyKey.length <= 64)
+    ? db.collection(`restaurantes/${restauranteId}/pedidos`).where('idempotencyKey', '==', idempotencyKey).limit(1)
+    : null;
+  const uidLimitRef = uidKey ? db.doc(`restaurantes/${restauranteId}/_ratelimits/${uidKey}`) : null;
+  const mesaLimitRef = db.doc(`restaurantes/${restauranteId}/_ratelimits/mesa_${mesaStr}`);
+  const existingPendienteQuery = db
     .collection(`restaurantes/${restauranteId}/pedidos`)
     .where('mesa', '==', mesaStr)
     .where('estado', '==', 'pendiente')
-    .limit(1)
-    .get();
+    .limit(1);
 
-  const isNewMesa = existingPendiente.empty;
+  const resultado = await db.runTransaction(async (tx) => {
+    // ── Todas las lecturas primero (requisito de las transacciones de Firestore) ──
+    const [idemSnap, uidLimitSnap, mesaLimitSnap, existingPendienteSnap] = await Promise.all([
+      idempotencyQuery ? tx.get(idempotencyQuery) : Promise.resolve(null),
+      uidLimitRef ? tx.get(uidLimitRef) : Promise.resolve(null),
+      tx.get(mesaLimitRef),
+      tx.get(existingPendienteQuery),
+    ]);
 
-  // ── Atomic batch write ──────────────────────────────────────────────────────
-  const batch = db.batch();
+    if (idemSnap && !idemSnap.empty) {
+      const d = idemSnap.docs[0];
+      return { pedidoId: d.id, total: d.data().total };
+    }
 
-  const nuevoPedidoRef = db.collection(`restaurantes/${restauranteId}/pedidos`).doc();
-  batch.set(nuevoPedidoRef, {
-    mesa: mesaStr,
-    items: itemsValidados,
-    total,
-    estado: 'pendiente',
-    nota: (nota || '').slice(0, 500),
-    creadoEn: FieldValue.serverTimestamp(),
-    clienteUid: clienteUid || request.auth?.uid || null,
-    idempotencyKey: (idempotencyKey && typeof idempotencyKey === 'string') ? idempotencyKey : null,
+    const now = Date.now();
+    const windowMs = 60_000;
+
+    // Rate limit por UID: máx 5 pedidos / 60s
+    if (uidLimitRef) {
+      if (uidLimitSnap.exists) {
+        const { count, windowStart } = uidLimitSnap.data();
+        if (now - windowStart < windowMs) {
+          if (count >= 5) {
+            throw new HttpsError('resource-exhausted', 'Demasiados pedidos. Espera un momento antes de volver a pedir.');
+          }
+          tx.update(uidLimitRef, { count: FieldValue.increment(1) });
+        } else {
+          tx.set(uidLimitRef, { count: 1, windowStart: now });
+        }
+      } else {
+        tx.set(uidLimitRef, { count: 1, windowStart: now });
+      }
+    }
+
+    // Rate limit por mesa: máx 10 pedidos / 60s (complementa el de UID, que se
+    // evade re-autenticándose anónimo)
+    if (mesaLimitSnap.exists) {
+      const { count, windowStart } = mesaLimitSnap.data();
+      if (now - windowStart < windowMs) {
+        if (count >= 10) {
+          throw new HttpsError('resource-exhausted', 'Demasiados pedidos desde esta mesa. Espera un momento.');
+        }
+        tx.update(mesaLimitRef, { count: FieldValue.increment(1) });
+      } else {
+        tx.set(mesaLimitRef, { count: 1, windowStart: now });
+      }
+    } else {
+      tx.set(mesaLimitRef, { count: 1, windowStart: now });
+    }
+
+    const isNewMesa = existingPendienteSnap.empty;
+    const nuevoPedidoRef = db.collection(`restaurantes/${restauranteId}/pedidos`).doc();
+    tx.set(nuevoPedidoRef, {
+      mesa: mesaStr,
+      items: itemsValidados,
+      total,
+      estado: 'pendiente',
+      nota: (nota || '').slice(0, 500),
+      creadoEn: FieldValue.serverTimestamp(),
+      clienteUid: request.auth?.uid || clienteUid || null,
+      idempotencyKey: (idempotencyKey && typeof idempotencyKey === 'string') ? idempotencyKey : null,
+    });
+
+    if (isNewMesa) {
+      tx.update(db.doc(`restaurantes/${restauranteId}`), {
+        'stats.mesasPendientes': FieldValue.increment(1),
+      });
+    }
+
+    return { pedidoId: nuevoPedidoRef.id, total };
   });
 
-  if (isNewMesa) {
-    batch.update(db.doc(`restaurantes/${restauranteId}`), {
-      'stats.mesasPendientes': FieldValue.increment(1),
-    });
-  }
-
-  await batch.commit();
-
-  return { pedidoId: nuevoPedidoRef.id, total };
+  return resultado;
 });
 
 // ── Limpieza semanal de usuarios anónimos (>30 días sin actividad) ─────────
