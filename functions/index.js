@@ -18,10 +18,13 @@ exports.crearPedido = onCall({ region: 'us-central1', timeoutSeconds: 30, minIns
   const { restauranteId, mesa, items, nota, clienteUid, idempotencyKey, token } = request.data;
 
   // ── Input validation ────────────────────────────────────────────────────────
-  if (!restauranteId || typeof restauranteId !== 'string') {
+  // Se rechaza '/' porque restauranteId y mesa se usan para construir paths de
+  // Firestore (restaurantes/${restauranteId}/..., _ratelimits/mesa_${mesa});
+  // un '/' desalinea los segmentos de la jerarquía de documentos.
+  if (!restauranteId || typeof restauranteId !== 'string' || restauranteId.includes('/')) {
     throw new HttpsError('invalid-argument', 'restauranteId inválido.');
   }
-  if (!mesa || typeof mesa !== 'string' || mesa.trim().length === 0) {
+  if (!mesa || typeof mesa !== 'string' || mesa.trim().length === 0 || mesa.includes('/')) {
     throw new HttpsError('invalid-argument', 'Mesa inválida.');
   }
   if (!Array.isArray(items) || items.length === 0 || items.length > 30) {
@@ -217,24 +220,31 @@ exports.limpiarPedidosAntiguos = onSchedule(
       const restauranteId = restauranteDoc.id;
       let borradosEnEstRest = 0;
 
-      // Paginar hasta no quedar pedidos viejos archivados
-      let hayMas = true;
-      while (hayMas) {
-        const snap = await db
-          .collection(`restaurantes/${restauranteId}/pedidos`)
-          .where('estado', '==', 'archivado')
-          .where('creadoEn', '<=', Timestamp.fromDate(cutoff))
-          .limit(BATCH_SIZE)
-          .get();
+      try {
+        // Paginar hasta no quedar pedidos viejos archivados
+        let hayMas = true;
+        while (hayMas) {
+          const snap = await db
+            .collection(`restaurantes/${restauranteId}/pedidos`)
+            .where('estado', '==', 'archivado')
+            .where('creadoEn', '<=', Timestamp.fromDate(cutoff))
+            .limit(BATCH_SIZE)
+            .get();
 
-        if (snap.empty) { hayMas = false; break; }
+          if (snap.empty) { hayMas = false; break; }
 
-        const batch = db.batch();
-        snap.docs.forEach((d) => batch.delete(d.ref));
-        await batch.commit();
+          const batch = db.batch();
+          snap.docs.forEach((d) => batch.delete(d.ref));
+          await batch.commit();
 
-        borradosEnEstRest += snap.size;
-        if (snap.size < BATCH_SIZE) hayMas = false;
+          borradosEnEstRest += snap.size;
+          if (snap.size < BATCH_SIZE) hayMas = false;
+        }
+      } catch (e) {
+        // Un fallo en un restaurante (p.ej. cuota excedida) no debe impedir
+        // limpiar los demás; el siguiente corrido (24h) retoma lo pendiente.
+        console.error(`[${restauranteId}] error limpiando pedidos archivados:`, e.message);
+        continue;
       }
 
       if (borradosEnEstRest > 0) {

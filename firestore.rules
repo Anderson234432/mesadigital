@@ -95,6 +95,10 @@ service cloud.firestore {
           request.auth != null &&
           request.resource.data.keys().hasAll(['mesa', 'items', 'total', 'estado', 'creadoEn']) &&
           request.resource.data.estado == 'pendiente' &&
+          // El pedido solo puede atribuirse al propio uid autenticado — si no,
+          // un cliente podría escribir clienteUid de otra persona y contaminar
+          // su historial de pedidos (ver allow read arriba).
+          request.resource.data.get('clienteUid', '') == request.auth.uid &&
           request.resource.data.mesa is string &&
           request.resource.data.mesa.size() > 0 &&
           request.resource.data.mesa.size() <= 20 &&
