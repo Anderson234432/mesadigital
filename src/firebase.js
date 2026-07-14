@@ -25,7 +25,7 @@ const app = initializeApp(firebaseConfig);
 // Hasta que la site key exista en Vercel, la app sigue funcionando igual
 // que antes — App Check solo se activa cuando el env var está presente.
 if (import.meta.env.VITE_RECAPTCHA_SITE_KEY) {
-  if (import.meta.env.DEV) {
+  if (import.meta.env.DEV || import.meta.env.VITE_APPCHECK_DEBUG) {
     self.FIREBASE_APPCHECK_DEBUG_TOKEN = true;
   }
   initializeAppCheck(app, {
