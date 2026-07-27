@@ -69,9 +69,20 @@ export function crearLlamadaMesero(restauranteId, mesa, clienteUid, mesaToken) {
 // a diferencia de la Cloud Function, que sí recalcula el precio server-side.
 // Las Rules de Firestore (allow create de pedidos) son la única validación de
 // precio en este camino: solo acotan el rango, no verifican precio real.
-export function crearPedidoDirecto(restauranteId, { mesa, carrito, total, nota, clienteUid, idempotencyKey, mesaToken }) {
+export async function crearPedidoDirecto(restauranteId, { mesa, carrito, total, nota, clienteUid, idempotencyKey, mesaToken }) {
+  const pedidosRef = collection(db, 'restaurantes', restauranteId, 'pedidos');
+
+  // isNewMesa: misma condición que la Cloud Function (mesa == mesa, estado ==
+  // 'pendiente'). Solo si no hay ya un pedido pendiente en esta mesa se
+  // incrementa stats.mesasPendientes — evita contar la misma mesa dos veces
+  // cuando el cliente envía una segunda ronda.
+  const existingPendienteSnap = await getDocs(
+    query(pedidosRef, where('mesa', '==', mesa), where('estado', '==', 'pendiente'), limit(1))
+  );
+  const isNewMesa = existingPendienteSnap.empty;
+
   const batch = writeBatch(db);
-  const ref = doc(collection(db, 'restaurantes', restauranteId, 'pedidos'));
+  const ref = doc(pedidosRef);
   batch.set(ref, {
     mesa,
     items: carrito.map((p) => ({ nombre: p.nombre, precio: p.precio, tiempoMin: p.tiempoMin || 0 })),
@@ -83,6 +94,11 @@ export function crearPedidoDirecto(restauranteId, { mesa, carrito, total, nota, 
     idempotencyKey: idempotencyKey || null,
     mesaToken: mesaToken || null,
   });
+  if (isNewMesa) {
+    batch.update(doc(db, 'restaurantes', restauranteId), {
+      'stats.mesasPendientes': increment(1),
+    });
+  }
   return batch.commit();
 }
 
