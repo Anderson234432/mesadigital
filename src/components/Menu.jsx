@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback, memo } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
+import { t } from '../i18n';
 import { loginAnonimo } from '../services/authService';
 import { subscribeRestaurante } from '../services/restaurantesService';
 import { subscribePlatos } from '../services/platosService';
@@ -13,7 +14,7 @@ import {
 } from '../services/pedidosService';
 
 // Memoized plato card — only re-renders when its own props change
-const PlatoItem = memo(function PlatoItem({ plato, cantidad, onAgregar, onQuitar }) {
+const PlatoItem = memo(function PlatoItem({ plato, cantidad, onAgregar, onQuitar, agregarLabel }) {
   return (
     <div className="border-b border-neutral-800 pb-4">
       {plato.imagenUrl && (
@@ -46,7 +47,7 @@ const PlatoItem = memo(function PlatoItem({ plato, cantidad, onAgregar, onQuitar
           ) : (
             <button onClick={() => onAgregar(plato)}
               className="border border-amber-400 text-amber-400 px-4 py-3 text-sm hover:bg-amber-400 hover:text-black transition-colors min-h-[44px]">
-              + Agregar
+              + {agregarLabel}
             </button>
           )}
         </div>
@@ -90,6 +91,13 @@ function Menu() {
   const [historialAbierto, setHistorialAbierto] = useState(false);
   const [pedidoEnviado, setPedidoEnviado] = useState('');
   const [error, setError] = useState('');
+  const [lang, setLang] = useState(() => {
+    try {
+      return localStorage.getItem('mesadigital_lang') || 'es';
+    } catch {
+      return 'es';
+    }
+  });
 
   const montadoRef = useRef(true);
   const subsRef = useRef({});
@@ -173,6 +181,13 @@ function Menu() {
       ))
       .sort((a, b) => (a.orden ?? 999) - (b.orden ?? 999));
   }, [platos, busqueda]);
+
+  const cambiarLang = useCallback((nuevoLang) => {
+    setLang(nuevoLang);
+    try {
+      localStorage.setItem('mesadigital_lang', nuevoLang);
+    } catch { /* no-op: localStorage no disponible */ }
+  }, []);
 
   // ─── Callbacks estables para PlatoItem ───────────────────
   const agregarAlCarrito = useCallback((plato) => {
@@ -320,8 +335,8 @@ function Menu() {
       ? Math.max(...carrito.filter((p) => p.categoria?.toLowerCase() !== 'bebidas').map((p) => p.tiempoMin || 15)) * (mesasPendientes + 1)
       : null;
     let mensajeExito = '';
-    if (tieneBebidas) mensajeExito += `🥤 Tu bebida tardará aprox ${tiempoBebida} min. `;
-    if (tieneComida) mensajeExito += `🍽️ Tu comida tardará aprox ${tiempoComida} min.`;
+    if (tieneBebidas) mensajeExito += `🥤 ${t[lang].tuBebidaTardara(tiempoBebida)}`;
+    if (tieneComida) mensajeExito += `🍽️ ${t[lang].tuComidaTardara(tiempoComida)}`;
 
     // Optimistic UI — rollback en fallo
     const carritoSnapshot = [...carrito];
@@ -348,7 +363,7 @@ function Menu() {
       // Éxito confirmado: el próximo envío es un pedido nuevo, no un reintento.
       idempotencyKeyRef.current = null;
       if (!montadoRef.current) return;
-      setPedidoEnviado(mensajeExito || '¡Pedido enviado!');
+      setPedidoEnviado(mensajeExito || t[lang].pedidoEnviado);
       setTimeout(() => { if (montadoRef.current) setPedidoEnviado(''); }, 5000);
     } catch (e) {
       // No se resetea idempotencyKeyRef aquí: si la CF sí completó el pedido
@@ -365,7 +380,7 @@ function Menu() {
       if (montadoRef.current) setEnviando(false);
       envioRef.current = false;
     }
-  }, [carrito, nota, total, mesasPendientes, tiemposRestaurante, restauranteId, numeroMesa]);
+  }, [carrito, nota, total, mesasPendientes, tiemposRestaurante, restauranteId, numeroMesa, lang]);
 
   const llamarMesero = useCallback(async () => {
     if (llamandoMesero) return;
@@ -385,11 +400,29 @@ function Menu() {
   return (
     <div className="min-h-screen bg-neutral-950 text-white font-serif">
 
+      {/* Selector de idioma */}
+      <div className="flex justify-end px-4 pt-3 bg-neutral-950">
+        <div className="inline-flex border border-neutral-700 rounded-full overflow-hidden">
+          <button onClick={() => cambiarLang('es')}
+            className={`px-3 py-1 text-xs font-bold tracking-widest transition-colors ${
+              lang === 'es' ? 'bg-amber-400 text-black' : 'text-neutral-400 hover:text-white'
+            }`}>
+            ES
+          </button>
+          <button onClick={() => cambiarLang('en')}
+            className={`px-3 py-1 text-xs font-bold tracking-widest transition-colors ${
+              lang === 'en' ? 'bg-amber-400 text-black' : 'text-neutral-400 hover:text-white'
+            }`}>
+            EN
+          </button>
+        </div>
+      </div>
+
       {/* Header */}
       <div className="relative h-48 flex items-end justify-center pb-6"
         style={{ background: 'linear-gradient(to bottom, #1a0a00, #0a0a0a)' }}>
         <div className="text-center">
-          <p className="text-amber-400 text-sm tracking-widest uppercase">Bienvenido</p>
+          <p className="text-amber-400 text-sm tracking-widest uppercase">{t[lang].bienvenido}</p>
           <h1 className="text-3xl font-bold tracking-wide">{restaurante?.nombre || ''}</h1>
         </div>
       </div>
@@ -399,7 +432,7 @@ function Menu() {
         <div className={`sticky top-0 z-40 w-full py-3 text-center text-sm font-bold tracking-widest uppercase ${
           estadoMesa === 'listo' ? 'bg-green-500 text-white animate-pulse' : 'bg-amber-400 text-black'
         }`}>
-          {estadoMesa === 'listo' ? '✓ Tu pedido está listo' : '🍳 Tu pedido está siendo preparado'}
+          {estadoMesa === 'listo' ? `✓ ${t[lang].pedidoListo}` : `🍳 ${t[lang].pedidoPreparando}`}
         </div>
       )}
 
@@ -408,7 +441,7 @@ function Menu() {
         <div className="max-w-lg mx-auto px-4 pt-4">
           <button onClick={() => setHistorialAbierto(!historialAbierto)}
             className="w-full text-xs text-neutral-500 hover:text-amber-400 transition-colors text-left">
-            {historialAbierto ? '▼' : '▶'} Ver mis pedidos
+            {historialAbierto ? '▼' : '▶'} {t[lang].verMisPedidos}
           </button>
           {historialAbierto && (
             <div className="border border-neutral-800 p-4 mt-2 mb-2 space-y-3">
@@ -431,7 +464,7 @@ function Menu() {
                 </div>
               ))}
               <div className="flex justify-between pt-1">
-                <span className="text-xs text-neutral-500">Total acumulado</span>
+                <span className="text-xs text-neutral-500">{t[lang].totalAcumulado}</span>
                 <span className="text-amber-400 font-bold text-sm">
                   RD${pedidosMesa.reduce((sum, p) => sum + (p.total || 0), 0)}
                 </span>
@@ -448,7 +481,7 @@ function Menu() {
             type="search"
             value={busqueda}
             onChange={(e) => { setBusqueda(e.target.value); setCategoriaActiva(null); }}
-            placeholder="Buscar por nombre o categoría..."
+            placeholder={t[lang].buscarPlaceholder}
             className="w-full bg-neutral-900 border border-neutral-700 px-4 py-3 text-white placeholder-neutral-500 text-base focus:outline-none focus:border-amber-400"
           />
           {busqueda && (
@@ -465,7 +498,7 @@ function Menu() {
       {busqueda.trim() ? (
         <div className="max-w-lg mx-auto px-4 py-4 space-y-4">
           {resultadosBusqueda.length === 0 ? (
-            <p className="text-neutral-500 text-sm text-center py-8">Sin resultados para "{busqueda}"</p>
+            <p className="text-neutral-500 text-sm text-center py-8">{t[lang].sinResultadosPara} "{busqueda}"</p>
           ) : (
             resultadosBusqueda.map((plato) => {
               const cantidad = carritoAgrupado.find((i) => i.id === plato.id)?.cantidad ?? 0;
@@ -476,6 +509,7 @@ function Menu() {
                   cantidad={cantidad}
                   onAgregar={agregarAlCarrito}
                   onQuitar={quitarDelCarrito}
+                  agregarLabel={t[lang].agregar}
                 />
               );
             })
@@ -495,10 +529,10 @@ function Menu() {
           <div className="flex items-center gap-3 mb-6">
             <button onClick={() => setCategoriaActiva(null)}
               className="text-amber-400 text-sm hover:underline">
-              ← Volver
+              ← {t[lang].volver}
             </button>
             <h2 className="text-amber-400 text-xs tracking-widest uppercase">
-              Menú de {categoriaActiva}
+              {t[lang].menuDe} {categoriaActiva}
             </h2>
           </div>
           <div className="space-y-4">
@@ -511,6 +545,7 @@ function Menu() {
                   cantidad={cantidad}
                   onAgregar={agregarAlCarrito}
                   onQuitar={quitarDelCarrito}
+                  agregarLabel={t[lang].agregar}
                 />
               );
             })}
@@ -541,7 +576,7 @@ function Menu() {
         <div className="fixed bottom-0 left-0 right-0 bg-neutral-900 border-t border-neutral-800 px-4 py-3 flex justify-center">
           <button onClick={llamarMesero} disabled={llamandoMesero}
             className="border border-neutral-600 text-neutral-400 px-6 py-3 text-sm hover:border-amber-400 hover:text-amber-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed min-h-[44px]">
-            {llamandoMesero ? '✓ Mesero notificado' : '🔔 Llamar al mesero'}
+            {llamandoMesero ? `✓ ${t[lang].meseroNotificado}` : `🔔 ${t[lang].llamarMesero}`}
           </button>
         </div>
       )}
@@ -551,7 +586,7 @@ function Menu() {
         <div className="fixed bottom-0 left-0 right-0 bg-neutral-900 border-t border-neutral-800">
           <button onClick={() => setCarritoAbierto(!carritoAbierto)}
             className="w-full flex justify-between items-center px-4 py-3">
-            <span className="text-sm text-neutral-400">{carrito.length} ítem(s)</span>
+            <span className="text-sm text-neutral-400">{carrito.length} {t[lang].items}</span>
             <span className="text-amber-400 font-bold">RD${total} {carritoAbierto ? '▼' : '▲'}</span>
           </button>
 
@@ -568,7 +603,7 @@ function Menu() {
               <textarea
                 value={nota}
                 onChange={(e) => setNota(e.target.value.slice(0, 500))}
-                placeholder="Nota para cocina (opcional)..."
+                placeholder={t[lang].notaPlaceholder}
                 rows={2}
                 maxLength={500}
                 className="w-full bg-neutral-800 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 text-base focus:outline-none focus:border-amber-400 resize-none mb-3"
@@ -579,11 +614,11 @@ function Menu() {
                   setCarrito([]);
                   sessionStorage.removeItem(`carrito_${restauranteId}_${numeroMesa}`);
                 }} className="text-xs text-neutral-500 hover:text-red-400 transition-colors">
-                  Cancelar
+                  {t[lang].cancelar}
                 </button>
                 <button onClick={enviarPedido} disabled={enviando}
                   className="bg-amber-400 text-black px-6 py-3 font-bold hover:bg-amber-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed min-h-[44px]">
-                  {enviando ? 'Enviando...' : 'Enviar pedido'}
+                  {enviando ? t[lang].enviando : t[lang].enviarPedido}
                 </button>
               </div>
             </div>
