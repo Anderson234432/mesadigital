@@ -3,6 +3,13 @@ import { getUid } from './authService';
 
 const MAESTRO_UID = import.meta.env.VITE_MAESTRO_UID;
 
+const IMPUESTOS_DEFAULT = {
+  itbisPorcentaje: 18,
+  propinaPorcentaje: 10,
+  itbisActivo: false,
+  propinaActivo: false,
+};
+
 export async function verificarAccesoAdmin(restauranteId) {
   const uid = getUid();
   if (!uid) return { acceso: false };
@@ -10,7 +17,12 @@ export async function verificarAccesoAdmin(restauranteId) {
   if (!snap.exists()) return { acceso: false };
   const data = snap.data();
   const acceso = uid === MAESTRO_UID || (data.adminUids || []).includes(uid);
-  return { acceso, nombre: data.nombre || '', tiempos: data.tiempos || {} };
+  return {
+    acceso,
+    nombre: data.nombre || '',
+    tiempos: data.tiempos || {},
+    impuestos: { ...IMPUESTOS_DEFAULT, ...(data.impuestos || {}) },
+  };
 }
 
 export async function verificarAccesoCocina(restauranteId) {
@@ -52,6 +64,9 @@ export const eliminarRestaurante = (restauranteId) =>
 
 export const guardarTiempos = (restauranteId, tiempos) =>
   repo.actualizarRestaurante(restauranteId, { tiempos });
+
+export const guardarImpuestos = (restauranteId, impuestos) =>
+  repo.actualizarRestaurante(restauranteId, { impuestos });
 
 export const guardarNumMesas = (restauranteId, numMesas) =>
   repo.actualizarRestaurante(restauranteId, { numMesas });

@@ -28,6 +28,19 @@ export function leerPedidosMesa(restauranteId, clienteUid) {
   return pedidosRepo.getPedidosPorUid(restauranteId, clienteUid);
 }
 
+// ─── Impuestos (ITBIS + propina legal) ────────────────────
+// Misma fórmula que functions/index.js: ambos porcentajes se aplican sobre
+// el subtotal (no en cascada), y cada componente se redondea por separado
+// para que el desglose que ve el cliente coincida exactamente con lo que
+// calcula la Cloud Function.
+export function calcularImpuestos(subtotal, impuestos = {}) {
+  const itbisPorcentaje = Number(impuestos.itbisPorcentaje) || 0;
+  const propinaPorcentaje = Number(impuestos.propinaPorcentaje) || 0;
+  const itbis = impuestos.itbisActivo ? Math.round(subtotal * itbisPorcentaje / 100) : 0;
+  const propina = impuestos.propinaActivo ? Math.round(subtotal * propinaPorcentaje / 100) : 0;
+  return { subtotal, itbis, propina, total: subtotal + itbis + propina };
+}
+
 // ─── Token de mesa (guardado por Menu.jsx al validar el QR) ──
 // Se lee aquí en vez de recibirlo por parámetro para evitar prop drilling
 // desde Menu.jsx a través de todas las llamadas de este servicio.
@@ -40,7 +53,12 @@ function leerTokenMesa(restauranteId, mesa) {
 }
 
 // ─── Envío de pedido (Cloud Function + fallback directo) ──
-export function enviarPedido(restauranteId, { mesa, carrito, total, nota, clienteUid, idempotencyKey }) {
+// `total` recibido aquí es el subtotal del carrito (suma de precios de
+// items, sin impuestos) — la CF lo recalcula desde platos/ de todos modos.
+// `impuestos` es la config del restaurante (restaurante.impuestos, ya
+// disponible en Menu.jsx vía subscribeRestaurante) — solo se usa en el
+// fallback directo, ya que la CF lee su propia copia server-side.
+export function enviarPedido(restauranteId, { mesa, carrito, total, nota, clienteUid, idempotencyKey, impuestos }) {
   const itemsAgrupados = carrito.reduce((acc, item) => {
     const e = acc.find((i) => i.id === item.id);
     if (e) e.cantidad += 1;
@@ -64,7 +82,8 @@ export function enviarPedido(restauranteId, { mesa, carrito, total, nota, client
         cfCode.includes('unauthenticated');
       if (!notDeployed) throw cfErr;
 
-      return pedidosRepo.crearPedidoDirecto(restauranteId, { mesa, carrito, total, nota, clienteUid, idempotencyKey, mesaToken: token });
+      const desglose = calcularImpuestos(total, impuestos);
+      return pedidosRepo.crearPedidoDirecto(restauranteId, { mesa, carrito, nota, clienteUid, idempotencyKey, mesaToken: token, ...desglose });
     }
   }
 

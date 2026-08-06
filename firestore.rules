@@ -104,9 +104,13 @@ service cloud.firestore {
           request.resource.data.mesa.size() <= 20 &&
           restauranteExiste(restauranteId) &&
           tokenDeMesaValido(restauranteId, request.resource.data.mesa, request.resource.data.get('mesaToken', '')) &&
+          // 65000 en vez de 50000: el total ahora puede incluir ITBIS (18%) +
+          // propina legal (10%), hasta +28% sobre el subtotal — se sube el
+          // tope para no rechazar pedidos legítimos grandes con ambos
+          // impuestos activos (50000 * 1.28 ≈ 64000).
           request.resource.data.total is number &&
           request.resource.data.total >= 0 &&
-          request.resource.data.total <= 50000 &&
+          request.resource.data.total <= 65000 &&
           request.resource.data.items is list &&
           request.resource.data.items.size() <= 30 &&
           (

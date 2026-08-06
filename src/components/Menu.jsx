@@ -11,23 +11,24 @@ import {
   parsearErrorPedido,
   reconectarFirestore,
   leerPedidosMesa,
+  calcularImpuestos,
 } from '../services/pedidosService';
 
 // Memoized plato card — only re-renders when its own props change
-const PlatoItem = memo(function PlatoItem({ plato, cantidad, onAgregar, onQuitar, agregarLabel }) {
+const PlatoItem = memo(function PlatoItem({ plato, nombreMostrado, cantidad, onAgregar, onQuitar, agregarLabel }) {
   return (
     <div className="border-b border-neutral-800 pb-4">
       {plato.imagenUrl && (
         <img
           src={plato.imagenUrl}
-          alt={plato.nombre}
+          alt={nombreMostrado}
           loading="lazy"
           className="w-full object-contain mb-3 max-h-64"
         />
       )}
       <div className="flex justify-between items-center">
         <div>
-          <p className="text-lg font-semibold">{plato.nombre}</p>
+          <p className="text-lg font-semibold">{nombreMostrado}</p>
           <p className="text-neutral-400 text-sm">{plato.descripcion}</p>
           <p className="text-amber-400 mt-1">RD${plato.precio}</p>
         </div>
@@ -164,6 +165,27 @@ function Menu() {
     [platos]
   );
 
+  // Agrupación siempre por `categoria` (español, dato canónico) — solo la
+  // etiqueta mostrada cambia con el idioma, así no se rompe la agrupación si
+  // algún plato de la categoría no tiene categoriaEn.
+  const categoriaEnMap = useMemo(() => {
+    const map = {};
+    platos.forEach((p) => {
+      if (p.categoriaEn?.trim() && !map[p.categoria]) map[p.categoria] = p.categoriaEn;
+    });
+    return map;
+  }, [platos]);
+
+  const etiquetaCategoria = useCallback(
+    (cat) => (lang === 'en' && categoriaEnMap[cat]) || cat,
+    [lang, categoriaEnMap]
+  );
+
+  const nombrePlato = useCallback(
+    (plato) => (lang === 'en' && plato.nombreEn?.trim()) || plato.nombre,
+    [lang]
+  );
+
   const platosFiltrados = useMemo(
     () => platos
       .filter((p) => p.categoria === categoriaActiva && p.disponible !== false)
@@ -171,16 +193,31 @@ function Menu() {
     [platos, categoriaActiva]
   );
 
+  // Busca en nombre (ES y EN) sin importar el idioma activo — un turista
+  // escribiendo "mofongo" en modo inglés debe encontrarlo igual.
   const resultadosBusqueda = useMemo(() => {
     const q = busqueda.trim().toLowerCase();
     if (!q) return [];
     return platos
       .filter((p) => p.disponible !== false && (
         p.nombre?.toLowerCase().includes(q) ||
+        p.nombreEn?.toLowerCase().includes(q) ||
         p.categoria?.toLowerCase().includes(q)
       ))
       .sort((a, b) => (a.orden ?? 999) - (b.orden ?? 999));
   }, [platos, busqueda]);
+
+  // ─── Impuestos (ITBIS + propina legal) ───────────────────
+  const impuestosConfig = useMemo(() => restaurante?.impuestos || {}, [restaurante]);
+  const itbisActivo = !!impuestosConfig.itbisActivo;
+  const propinaActivo = !!impuestosConfig.propinaActivo;
+  const itbisPct = Number(impuestosConfig.itbisPorcentaje) || 0;
+  const propinaPct = Number(impuestosConfig.propinaPorcentaje) || 0;
+
+  const desglose = useMemo(
+    () => calcularImpuestos(total, impuestosConfig),
+    [total, impuestosConfig]
+  );
 
   const cambiarLang = useCallback((nuevoLang) => {
     setLang(nuevoLang);
@@ -355,6 +392,7 @@ function Menu() {
           total: totalSnapshot, nota: notaSnapshot,
           clienteUid: clienteUidRef.current,
           idempotencyKey: idempotencyKeyRef.current,
+          impuestos: impuestosConfig,
         }),
         new Promise((_, reject) => {
           _timeoutId = setTimeout(() => reject(new Error('timeout')), 15000);
@@ -380,7 +418,7 @@ function Menu() {
       if (montadoRef.current) setEnviando(false);
       envioRef.current = false;
     }
-  }, [carrito, nota, total, mesasPendientes, tiemposRestaurante, restauranteId, numeroMesa, lang]);
+  }, [carrito, nota, total, mesasPendientes, tiemposRestaurante, restauranteId, numeroMesa, lang, impuestosConfig]);
 
   const llamarMesero = useCallback(async () => {
     if (llamandoMesero) return;
@@ -494,6 +532,11 @@ function Menu() {
         </div>
       </div>
 
+      {/* Aviso de impuestos */}
+      {(itbisActivo || propinaActivo) && (
+        <p className="max-w-lg mx-auto px-4 text-neutral-600 text-xs mb-2">{t[lang].preciosSinImpuestos}</p>
+      )}
+
       {/* Resultados de búsqueda / Categorías / Lista de platos */}
       {busqueda.trim() ? (
         <div className="max-w-lg mx-auto px-4 py-4 space-y-4">
@@ -506,6 +549,7 @@ function Menu() {
                 <PlatoItem
                   key={plato.id}
                   plato={plato}
+                  nombreMostrado={nombrePlato(plato)}
                   cantidad={cantidad}
                   onAgregar={agregarAlCarrito}
                   onQuitar={quitarDelCarrito}
@@ -520,7 +564,7 @@ function Menu() {
           {categorias.map((cat) => (
             <button key={cat} onClick={() => setCategoriaActiva(cat)}
               className="w-full border border-neutral-700 py-4 text-left px-6 text-lg font-semibold hover:border-amber-400 hover:text-amber-400 transition-colors capitalize">
-              {cat}
+              {etiquetaCategoria(cat)}
             </button>
           ))}
         </div>
@@ -532,7 +576,7 @@ function Menu() {
               ← {t[lang].volver}
             </button>
             <h2 className="text-amber-400 text-xs tracking-widest uppercase">
-              {t[lang].menuDe} {categoriaActiva}
+              {t[lang].menuDe} {etiquetaCategoria(categoriaActiva)}
             </h2>
           </div>
           <div className="space-y-4">
@@ -542,6 +586,7 @@ function Menu() {
                 <PlatoItem
                   key={plato.id}
                   plato={plato}
+                  nombreMostrado={nombrePlato(plato)}
                   cantidad={cantidad}
                   onAgregar={agregarAlCarrito}
                   onQuitar={quitarDelCarrito}
@@ -587,7 +632,7 @@ function Menu() {
           <button onClick={() => setCarritoAbierto(!carritoAbierto)}
             className="w-full flex justify-between items-center px-4 py-3">
             <span className="text-sm text-neutral-400">{carrito.length} {t[lang].items}</span>
-            <span className="text-amber-400 font-bold">RD${total} {carritoAbierto ? '▼' : '▲'}</span>
+            <span className="text-amber-400 font-bold">RD${desglose.total} {carritoAbierto ? '▼' : '▲'}</span>
           </button>
 
           {carritoAbierto && (
@@ -600,6 +645,30 @@ function Menu() {
                   </div>
                 ))}
               </div>
+              {(itbisActivo || propinaActivo) && (
+                <div className="space-y-1 mb-3 pt-3 border-t border-neutral-700 text-sm">
+                  <div className="flex justify-between text-neutral-400">
+                    <span>{t[lang].subtotal}</span>
+                    <span>RD${desglose.subtotal}</span>
+                  </div>
+                  {itbisActivo && (
+                    <div className="flex justify-between text-neutral-400">
+                      <span>{t[lang].itbisLabel(itbisPct)}</span>
+                      <span>RD${desglose.itbis}</span>
+                    </div>
+                  )}
+                  {propinaActivo && (
+                    <div className="flex justify-between text-neutral-400">
+                      <span>{t[lang].propinaLabel(propinaPct)}</span>
+                      <span>RD${desglose.propina}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between text-amber-400 font-bold pt-1 border-t border-neutral-800">
+                    <span>{t[lang].totalLabel}</span>
+                    <span>RD${desglose.total}</span>
+                  </div>
+                </div>
+              )}
               <textarea
                 value={nota}
                 onChange={(e) => setNota(e.target.value.slice(0, 500))}
@@ -625,6 +694,10 @@ function Menu() {
           )}
         </div>
       )}
+
+      <p className="text-center text-neutral-600 mt-10 mb-24" style={{ fontSize: '12px' }}>
+        {t[lang].creditoFooter}
+      </p>
 
     </div>
   );

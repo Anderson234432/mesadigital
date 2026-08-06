@@ -69,7 +69,7 @@ export function crearLlamadaMesero(restauranteId, mesa, clienteUid, mesaToken) {
 // a diferencia de la Cloud Function, que sí recalcula el precio server-side.
 // Las Rules de Firestore (allow create de pedidos) son la única validación de
 // precio en este camino: solo acotan el rango, no verifican precio real.
-export async function crearPedidoDirecto(restauranteId, { mesa, carrito, total, nota, clienteUid, idempotencyKey, mesaToken }) {
+export async function crearPedidoDirecto(restauranteId, { mesa, carrito, subtotal, itbis, propina, total, nota, clienteUid, idempotencyKey, mesaToken }) {
   const pedidosRef = collection(db, 'restaurantes', restauranteId, 'pedidos');
 
   // isNewMesa: misma condición que la Cloud Function (mesa == mesa, estado ==
@@ -86,6 +86,9 @@ export async function crearPedidoDirecto(restauranteId, { mesa, carrito, total, 
   batch.set(ref, {
     mesa,
     items: carrito.map((p) => ({ nombre: p.nombre, precio: p.precio, tiempoMin: p.tiempoMin || 0 })),
+    subtotal,
+    itbis,
+    propina,
     total,
     estado: 'pendiente',
     nota: nota.slice(0, 500),

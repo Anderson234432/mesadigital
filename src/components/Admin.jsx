@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useParams } from 'react-router-dom';
-import { verificarAccesoAdmin, guardarTiempos } from '../services/restaurantesService';
+import { verificarAccesoAdmin, guardarTiempos, guardarImpuestos } from '../services/restaurantesService';
 import { subscribePlatos, guardarPlato, eliminarPlato, toggleDisponible } from '../services/platosService';
 import { subscribePedidosDia, subscribePedidosPeriodo, actualizarEstadoMesa } from '../services/pedidosService';
 import { logout, getUid } from '../services/authService';
@@ -26,13 +26,14 @@ export default function Admin() {
   const [mesBase, setMesBase] = useState({ y: new Date().getFullYear(), m: new Date().getMonth() });
   const [busqueda, setBusqueda] = useState('');
   const [form, setForm] = useState({
-    nombre: '', precio: '', categoria: '',
+    nombre: '', nombreEn: '', precio: '', categoria: '', categoriaEn: '',
     descripcion: '', imagenUrl: '', disponible: true, tiempoMin: '', orden: '',
   });
   const [editandoId, setEditandoId] = useState(null);
   const [imagen, setImagen] = useState(null);
   const [fileKey, setFileKey] = useState(0);
   const [tiemposForm, setTiemposForm] = useState({});
+  const [impuestosForm, setImpuestosForm] = useState({});
   const [guardando, setGuardando] = useState(false);
   const [mensaje, setMensaje] = useState({ texto: '', tipo: '' });
   const [confirmarEliminarId, setConfirmarEliminarId] = useState(null);
@@ -45,7 +46,7 @@ export default function Admin() {
   }, []);
 
   const formVacio = {
-    nombre: '', precio: '', categoria: '',
+    nombre: '', nombreEn: '', precio: '', categoria: '', categoriaEn: '',
     descripcion: '', imagenUrl: '', disponible: true, tiempoMin: '', orden: '',
   };
 
@@ -242,12 +243,13 @@ export default function Admin() {
   // ─── Effect 1: acceso + platos ────────────────────────────
   useEffect(() => {
     verificarAccesoAdmin(restauranteId)
-      .then(({ acceso: ok, nombre, tiempos }) => {
+      .then(({ acceso: ok, nombre, tiempos, impuestos }) => {
         if (!montadoRef.current) return;
         setAcceso(ok);
         if (ok) {
           setNombreRestaurante(nombre);
           setTiemposForm(tiempos);
+          setImpuestosForm(impuestos);
         }
       })
       .catch((e) => {
@@ -319,6 +321,19 @@ export default function Admin() {
       if (montadoRef.current) mostrarMensaje('Tiempos guardados.', 'ok');
     } catch {
       if (montadoRef.current) mostrarMensaje('Error al guardar tiempos.', 'error');
+    }
+  };
+
+  const handleGuardarImpuestos = async () => {
+    try {
+      await guardarImpuestos(restauranteId, {
+        ...impuestosForm,
+        itbisPorcentaje: Number(impuestosForm.itbisPorcentaje) || 0,
+        propinaPorcentaje: Number(impuestosForm.propinaPorcentaje) || 0,
+      });
+      if (montadoRef.current) mostrarMensaje('Impuestos guardados.', 'ok');
+    } catch {
+      if (montadoRef.current) mostrarMensaje('Error al guardar impuestos.', 'error');
     }
   };
 
@@ -405,10 +420,20 @@ export default function Admin() {
           </h2>
           <input name="nombre" placeholder="Nombre *" value={form.nombre} onChange={handleChange}
             className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-base" />
+          <div>
+            <input name="nombreEn" placeholder="Nombre en inglés (opcional)" value={form.nombreEn} onChange={handleChange}
+              className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-base" />
+            <p className="text-neutral-600 text-xs mt-1">Si lo dejas vacío, se mostrará el nombre en español.</p>
+          </div>
           <input name="precio" placeholder="Precio *" type="number" value={form.precio} onChange={handleChange}
             className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-base" />
           <input name="categoria" placeholder="Categoría *" value={form.categoria} onChange={handleChange}
             className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-base" />
+          <div>
+            <input name="categoriaEn" placeholder="Categoría en inglés (opcional)" value={form.categoriaEn} onChange={handleChange}
+              className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-base" />
+            <p className="text-neutral-600 text-xs mt-1">Si lo dejas vacío, se mostrará la categoría en español.</p>
+          </div>
           <input name="orden" placeholder="Orden de aparición en menú (1, 2, 3…)" type="number" value={form.orden} onChange={handleChange}
             className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-base" />
 
@@ -517,6 +542,58 @@ export default function Admin() {
           <button onClick={handleGuardarTiempos}
             className="mt-4 bg-amber-400 text-black px-6 py-2 font-bold hover:bg-amber-300 transition-colors">
             Guardar tiempos
+          </button>
+        </div>
+
+        {/* ── Impuestos ── */}
+        <div className="border border-neutral-800 p-6 mt-8">
+          <h2 className="text-amber-400 text-xs tracking-widest uppercase mb-1">Impuestos</h2>
+          <p className="text-neutral-500 text-xs mb-4">
+            Los precios del menú se muestran sin impuestos. Actívalos aquí si tu restaurante los cobra aparte.
+          </p>
+          <div className="space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <label className="text-neutral-400 text-sm">Cobrar ITBIS</label>
+              <button
+                onClick={() => setImpuestosForm((f) => ({ ...f, itbisActivo: !f.itbisActivo }))}
+                className={`text-xs border px-3 py-2 min-h-[44px] transition-colors ${
+                  impuestosForm.itbisActivo
+                    ? 'border-amber-400 text-amber-400'
+                    : 'border-neutral-600 text-neutral-400 hover:border-amber-400 hover:text-amber-400'}`}>
+                {impuestosForm.itbisActivo ? 'Activado' : 'Desactivado'}
+              </button>
+            </div>
+            {impuestosForm.itbisActivo && (
+              <div className="flex items-center gap-3">
+                <label className="text-neutral-400 text-sm w-32">Porcentaje ITBIS</label>
+                <input type="number" value={impuestosForm.itbisPorcentaje ?? ''}
+                  onChange={(e) => setImpuestosForm((f) => ({ ...f, itbisPorcentaje: e.target.value }))}
+                  className="w-24 bg-neutral-900 border border-neutral-700 px-3 py-2 text-white focus:outline-none focus:border-amber-400 text-base" />
+              </div>
+            )}
+            <div className="flex items-center justify-between gap-3">
+              <label className="text-neutral-400 text-sm">Cobrar propina legal</label>
+              <button
+                onClick={() => setImpuestosForm((f) => ({ ...f, propinaActivo: !f.propinaActivo }))}
+                className={`text-xs border px-3 py-2 min-h-[44px] transition-colors ${
+                  impuestosForm.propinaActivo
+                    ? 'border-amber-400 text-amber-400'
+                    : 'border-neutral-600 text-neutral-400 hover:border-amber-400 hover:text-amber-400'}`}>
+                {impuestosForm.propinaActivo ? 'Activado' : 'Desactivado'}
+              </button>
+            </div>
+            {impuestosForm.propinaActivo && (
+              <div className="flex items-center gap-3">
+                <label className="text-neutral-400 text-sm w-32">Porcentaje propina</label>
+                <input type="number" value={impuestosForm.propinaPorcentaje ?? ''}
+                  onChange={(e) => setImpuestosForm((f) => ({ ...f, propinaPorcentaje: e.target.value }))}
+                  className="w-24 bg-neutral-900 border border-neutral-700 px-3 py-2 text-white focus:outline-none focus:border-amber-400 text-base" />
+              </div>
+            )}
+          </div>
+          <button onClick={handleGuardarImpuestos}
+            className="mt-4 bg-amber-400 text-black px-6 py-2 font-bold hover:bg-amber-300 transition-colors min-h-[44px]">
+            Guardar impuestos
           </button>
         </div>
 

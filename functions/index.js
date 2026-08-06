@@ -38,11 +38,15 @@ exports.crearPedido = onCall({ region: 'us-central1', timeoutSeconds: 30, minIns
   // sin token, para no romper compatibilidad hacia atrás. mesaTokens vive en
   // _privado/mesaTokens (no en el documento raíz, que tiene lectura pública) —
   // ver firestore.rules.
-  const privadoSnap = await db.doc(`restaurantes/${restauranteId}/_privado/mesaTokens`).get();
+  const [privadoSnap, restauranteSnap] = await Promise.all([
+    db.doc(`restaurantes/${restauranteId}/_privado/mesaTokens`).get(),
+    db.doc(`restaurantes/${restauranteId}`).get(),
+  ]);
   const mesaTokens = privadoSnap.data()?.mesaTokens;
   if (mesaTokens && mesaTokens[mesaStr] !== token) {
     throw new HttpsError('permission-denied', 'Token de mesa inválido.');
   }
+  const impuestosConfig = restauranteSnap.data()?.impuestos || {};
 
   // ── Fetch verified prices from server (fuera de la transacción: no necesita
   // atomicidad con lo demás, y evita cargar la transacción con hasta 30 reads) ──
@@ -51,7 +55,7 @@ exports.crearPedido = onCall({ region: 'us-central1', timeoutSeconds: 30, minIns
   );
 
   const itemsValidados = [];
-  let total = 0;
+  let subtotal = 0;
 
   for (let i = 0; i < items.length; i++) {
     const snap = platoSnaps[i];
@@ -69,9 +73,19 @@ exports.crearPedido = onCall({ region: 'us-central1', timeoutSeconds: 30, minIns
         precio: plato.precio,   // server price — cannot be spoofed
         tiempoMin: plato.tiempoMin || 0,
       });
-      total += plato.precio;
+      subtotal += plato.precio;
     }
   }
+
+  // ITBIS y propina legal se aplican sobre el subtotal, no en cascada (ITBIS
+  // sobre subtotal, propina sobre subtotal — nunca propina sobre subtotal+ITBIS).
+  // Misma fórmula que calcularImpuestos() en src/services/pedidosService.js,
+  // para que el total coincida exactamente con lo que ve el cliente.
+  const itbisPct = Number(impuestosConfig.itbisPorcentaje) || 0;
+  const propinaPct = Number(impuestosConfig.propinaPorcentaje) || 0;
+  const itbis = impuestosConfig.itbisActivo ? Math.round(subtotal * itbisPct / 100) : 0;
+  const propina = impuestosConfig.propinaActivo ? Math.round(subtotal * propinaPct / 100) : 0;
+  const total = subtotal + itbis + propina;
 
   // ── Idempotencia + rate limiting (UID y mesa) + escritura: todo en una sola
   // transacción. Un check-then-write separado (como antes) deja una ventana
@@ -149,6 +163,9 @@ exports.crearPedido = onCall({ region: 'us-central1', timeoutSeconds: 30, minIns
     tx.set(nuevoPedidoRef, {
       mesa: mesaStr,
       items: itemsValidados,
+      subtotal,
+      itbis,
+      propina,
       total,
       estado: 'pendiente',
       nota: (nota || '').slice(0, 500),

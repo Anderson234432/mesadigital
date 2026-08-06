@@ -16,8 +16,10 @@ export async function guardarPlato(restauranteId, form, imagen, editandoId) {
 
   const datos = {
     nombre: form.nombre,
+    nombreEn: form.nombreEn || '',
     precio: Number(form.precio),
     categoria: form.categoria,
+    categoriaEn: form.categoriaEn || '',
     descripcion: form.descripcion || '',
     imagenUrl,
     disponible: form.disponible !== false,
