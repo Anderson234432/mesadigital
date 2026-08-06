@@ -230,7 +230,7 @@ function Menu() {
   const agregarAlCarrito = useCallback((plato) => {
     idempotencyKeyRef.current = null;
     setCarrito((prev) => [...prev, {
-      id: plato.id, nombre: plato.nombre, precio: plato.precio,
+      id: plato.id, nombre: plato.nombre, nombreEn: plato.nombreEn || null, precio: plato.precio,
       categoria: plato.categoria, tiempoMin: plato.tiempoMin || 0,
     }]);
   }, []);
@@ -494,7 +494,7 @@ function Menu() {
                           return acc;
                         }, {})
                       ).map((item, j) => (
-                        <li key={j}>{item.nombre} x{item.cantidad}</li>
+                        <li key={j}>{nombrePlato(item)} x{item.cantidad}</li>
                       ))}
                     </ul>
                     <p className="text-amber-400 text-xs font-bold ml-4">RD${p.total}</p>
@@ -640,7 +640,7 @@ function Menu() {
               <div className="space-y-1 mb-3 max-h-40 overflow-y-auto">
                 {carritoAgrupado.map((item) => (
                   <div key={item.id} className="flex justify-between text-sm text-neutral-300">
-                    <span>{item.nombre} x{item.cantidad}</span>
+                    <span>{nombrePlato(item)} x{item.cantidad}</span>
                     <span>RD${item.subtotal}</span>
                   </div>
                 ))}

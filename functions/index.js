@@ -70,6 +70,7 @@ exports.crearPedido = onCall({ region: 'us-central1', timeoutSeconds: 30, minIns
     for (let j = 0; j < cantidad; j++) {
       itemsValidados.push({
         nombre: plato.nombre,
+        nombreEn: plato.nombreEn || null,
         precio: plato.precio,   // server price — cannot be spoofed
         tiempoMin: plato.tiempoMin || 0,
       });

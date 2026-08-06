@@ -85,7 +85,7 @@ export async function crearPedidoDirecto(restauranteId, { mesa, carrito, subtota
   const ref = doc(pedidosRef);
   batch.set(ref, {
     mesa,
-    items: carrito.map((p) => ({ nombre: p.nombre, precio: p.precio, tiempoMin: p.tiempoMin || 0 })),
+    items: carrito.map((p) => ({ nombre: p.nombre, nombreEn: p.nombreEn || null, precio: p.precio, tiempoMin: p.tiempoMin || 0 })),
     subtotal,
     itbis,
     propina,
