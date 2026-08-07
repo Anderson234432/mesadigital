@@ -1,6 +1,6 @@
 import { Component, useState, useEffect, lazy, Suspense } from "react";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
-import { suscribirEstadoAuth, esMaestro } from "../services/authService";
+import { suscribirEstadoAuth, esMaestroAsync } from "../services/authService";
 
 class ErrorBoundary extends Component {
   state = { crashed: false };
@@ -66,6 +66,29 @@ function Landing() {
   );
 }
 
+// Chequeo de maestro aislado en su propia ruta: requiere una lectura extra a
+// Firestore (config/maestros, ver esMaestroAsync), y no debe frenar el
+// arranque general de la app (menú del cliente, admin, cocina) para
+// resolverlo — solo importa cuando alguien realmente navega a /maestro.
+function RutaMaestro({ usuario }) {
+  const [verificando, setVerificando] = useState(true);
+  const [esMaestroActual, setEsMaestroActual] = useState(false);
+
+  useEffect(() => {
+    if (!usuario) return; // sin usuario, el render de abajo ya muestra <Login/> directo
+    let vivo = true;
+    esMaestroAsync(usuario.uid)
+      .then((res) => { if (vivo) setEsMaestroActual(res); })
+      .catch(() => { if (vivo) setEsMaestroActual(false); })
+      .finally(() => { if (vivo) setVerificando(false); });
+    return () => { vivo = false; };
+  }, [usuario]);
+
+  if (!usuario) return <Login />;
+  if (verificando) return <div className="min-h-screen bg-neutral-950" />;
+  return esMaestroActual ? <PanelMaestro /> : <Login />;
+}
+
 function NotFound() {
   return (
     <div className="min-h-screen bg-neutral-950 text-white font-serif flex items-center justify-center">
@@ -102,9 +125,7 @@ function App() {
           <Route path="/restaurante/:restauranteId/menu/:numeroMesa" element={<Menu />} />
           <Route path="/restaurante/:restauranteId/admin" element={usuario ? <Admin /> : <Login />} />
           <Route path="/restaurante/:restauranteId/cocina" element={usuario ? <Cocina /> : <Login />} />
-          <Route path="/maestro" element={
-            !usuario ? <Login /> : esMaestro() ? <PanelMaestro /> : <Login />
-          } />
+          <Route path="/maestro" element={<RutaMaestro usuario={usuario} />} />
           <Route path="*" element={<NotFound />} />
           </Routes>
         </Suspense>

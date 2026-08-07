@@ -4,9 +4,25 @@ service cloud.firestore {
 
     // ── Helpers ────────────────────────────────────────────────────────────────
 
-    function esMaestro() {
+    // UID hardcodeado: respaldo de gobernanza permanente. Nunca depende de
+    // un documento de Firestore, así que esta cuenta no puede perderse salvo
+    // perder literalmente ese login — mismo riesgo que existía antes de
+    // config/maestros, sin regresión. Solo esta cuenta puede modificar quién
+    // más es maestro (ver match /config/maestros más abajo).
+    function esMaestroOriginal() {
       return request.auth != null
         && request.auth.uid == 'xB7aybhKvYhIkuq7TERTuMfUkaH2';
+    }
+
+    // Maestro = el UID original, o cualquier UID listado en config/maestros —
+    // así el dueño puede delegar el día a día sin depender de una sola cuenta,
+    // sin dejar de tener un camino de recuperación que nunca se puede perder.
+    function esMaestro() {
+      return esMaestroOriginal() || (
+        request.auth != null &&
+        exists(/databases/$(database)/documents/config/maestros) &&
+        request.auth.uid in get(/databases/$(database)/documents/config/maestros).data.get('uids', [])
+      );
     }
 
     function getRestaurante(restauranteId) {
@@ -168,6 +184,17 @@ service cloud.firestore {
       allow get: if true;
       allow list: if esMaestro();
       allow create, update, delete: if esMaestro();
+    }
+
+    // ── Lista de co-maestros ────────────────────────────────────────────────────
+    // { uids: [...] } — solo el UID original puede escribirla. Si cualquier
+    // maestro pudiera hacerlo, un co-maestro comprometido (o un error) podría
+    // vaciar la lista y dejar fuera hasta al dueño. Restringir la escritura al
+    // UID original preserva la garantía de que esa cuenta nunca se pierde,
+    // mientras permite delegar el trabajo diario a co-maestros.
+    match /config/maestros {
+      allow read: if esMaestro();
+      allow write: if esMaestroOriginal();
     }
   }
 }

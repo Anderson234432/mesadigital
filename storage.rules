@@ -2,6 +2,19 @@ rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
 
+    // UID original hardcodeado (respaldo permanente) o cualquier UID listado
+    // en config/maestros.uids — mismo mecanismo que esMaestro() en
+    // firestore.rules, para que el acceso a imágenes tampoco dependa de un
+    // solo UID. firestore.exists() evita que firestore.get() lance un error
+    // cuando config/maestros todavía no se ha creado (caso normal hasta que
+    // el maestro agregue un co-maestro).
+    function esMaestro() {
+      return request.auth.uid == 'xB7aybhKvYhIkuq7TERTuMfUkaH2' || (
+        firestore.exists(/databases/(default)/documents/config/maestros) &&
+        request.auth.uid in firestore.get(/databases/(default)/documents/config/maestros).data.get('uids', [])
+      );
+    }
+
     // ── Ruta vieja (sin restauranteId) ──────────────────────────────────────
     // Ya no acepta escrituras nuevas: sin restauranteId en el path no hay forma
     // de verificar a qué restaurante pertenece una imagen, así que un admin de
@@ -18,13 +31,13 @@ service firebase.storage {
       // Imágenes del menú: lectura pública (clientes las ven en el menú)
       allow read: if true;
       // Solo staff autenticado (no anónimo) que sea admin de ESTE restaurante,
-      // o el maestro, puede subir o eliminar. firestore.get() cuesta 1 lectura
-      // de Firestore por escritura — subir/editar un plato es una acción de
-      // staff, poco frecuente, así que el costo es insignificante.
+      // o el maestro, puede subir o eliminar. Cada firestore.get() cuesta 1
+      // lectura de Firestore por escritura — subir/editar un plato es una
+      // acción de staff, poco frecuente, así que el costo es insignificante.
       allow write: if request.auth != null
         && request.auth.token.firebase.sign_in_provider != 'anonymous'
         && (
-          request.auth.uid == 'xB7aybhKvYhIkuq7TERTuMfUkaH2' ||
+          esMaestro() ||
           request.auth.uid in firestore.get(/databases/(default)/documents/restaurantes/$(restauranteId)).data.get('adminUids', [])
         );
     }
