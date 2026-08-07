@@ -134,6 +134,16 @@ service cloud.firestore {
         allow read, write: if false;
       }
 
+      // ── Ventas diarias agregadas (solo Cloud Function via Admin SDK) ─────────
+      // Un documento por día con totales y ranking de platos ya sumados —
+      // Admin.jsx lee esto para semana/mes en vez de leer todos los pedidos
+      // del período (lo que causaba el límite de 500 y totales incompletos).
+      // Solo personal del restaurante puede leerlo (dato de ventas sensible).
+      match /ventasDiarias/{fecha} {
+        allow read: if esPersonal(restauranteId);
+        allow write: if false;
+      }
+
       // ── Datos privados (mesaTokens) ───────────────────────────────────────────
       // Firestore no soporta seguridad a nivel de campo: mesaTokens no puede vivir
       // en el documento público de restaurantes/{id} (que tiene allow read: if true)

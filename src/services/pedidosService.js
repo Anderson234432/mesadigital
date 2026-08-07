@@ -134,6 +134,14 @@ export function subscribePedidosHoy(restauranteId, cb, onError) {
 export const subscribePedidosPorUid = (restauranteId, clienteUid, cb, onError) =>
   pedidosRepo.subscribePedidosPorUid(restauranteId, clienteUid, cb, onError);
 
+export function subscribeVentasDiarias(restauranteId, fechaInicioStr, fechaFinStr, cb) {
+  return pedidosRepo.subscribeVentasDiarias(
+    restauranteId, fechaInicioStr, fechaFinStr,
+    cb,
+    (err) => console.error('subscribeVentasDiarias:', err)
+  );
+}
+
 // ─── Clasificación de errores ─────────────────────────────
 export function parsearErrorPedido(e) {
   const code = (e?.code || '').toLowerCase();

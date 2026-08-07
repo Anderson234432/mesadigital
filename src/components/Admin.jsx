@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { useParams } from 'react-router-dom';
 import { verificarAccesoAdmin, guardarTiempos, guardarImpuestos } from '../services/restaurantesService';
 import { subscribePlatos, guardarPlato, eliminarPlato, toggleDisponible } from '../services/platosService';
-import { subscribePedidosDia, subscribePedidosPeriodo, actualizarEstadoMesa } from '../services/pedidosService';
+import { subscribePedidosDia, subscribePedidosPeriodo, subscribeVentasDiarias, actualizarEstadoMesa } from '../services/pedidosService';
 import { logout, getUid } from '../services/authService';
 
 function localDateStr(date = new Date()) {
@@ -20,6 +20,7 @@ export default function Admin() {
   const [nombreRestaurante, setNombreRestaurante] = useState('');
   const [platos, setPlatos] = useState([]);
   const [pedidos, setPedidos] = useState([]);
+  const [ventasDiarias, setVentasDiarias] = useState([]);
   const [fechaFiltro, setFechaFiltro] = useState(localDateStr);
   const [vistaVentas, setVistaVentas] = useState('dia');
   const [semanaBase, setSemanaBase] = useState(localDateStr());
@@ -88,31 +89,53 @@ export default function Admin() {
     [pedidos]
   );
 
-  const totalDia = useMemo(
-    () => pedidosReales.reduce((sum, p) => sum + (p.total || 0), 0),
-    [pedidosReales]
-  );
+  // Día: los totales salen de los pedidos del propio día (nunca ha habido
+  // riesgo de truncar, un restaurante no llega a cientos de pedidos en un día).
+  // Semana/Mes: salen de ventasDiarias (agregado server-side por la Cloud
+  // Function), no de sumar los pedidos individuales del período — así los
+  // totales son siempre correctos sin importar cuántos pedidos haya.
+  const totalDia = useMemo(() => {
+    if (vistaVentas === 'dia') return pedidosReales.reduce((sum, p) => sum + (p.total || 0), 0);
+    return ventasDiarias.reduce((sum, v) => sum + (v.total || 0), 0);
+  }, [vistaVentas, pedidosReales, ventasDiarias]);
+
+  const cantidadPedidosPeriodo = useMemo(() => {
+    if (vistaVentas === 'dia') return pedidosReales.length;
+    return ventasDiarias.reduce((sum, v) => sum + (v.cantidadPedidos || 0), 0);
+  }, [vistaVentas, pedidosReales, ventasDiarias]);
 
   const ticketPromedio = useMemo(
-    () => pedidosReales.length > 0 ? Math.round(totalDia / pedidosReales.length) : 0,
-    [totalDia, pedidosReales]
+    () => cantidadPedidosPeriodo > 0 ? Math.round(totalDia / cantidadPedidosPeriodo) : 0,
+    [totalDia, cantidadPedidosPeriodo]
   );
 
   const desglosePorDia = useMemo(() => {
     if (vistaVentas === 'dia') return [];
-    const mapa = {};
-    pedidosReales.forEach((p) => {
-      const d = p.creadoEn?.toDate();
-      if (!d) return;
-      const key = localDateStr(d);
-      if (!mapa[key]) mapa[key] = { fecha: d, total: 0, cantidad: 0 };
-      mapa[key].total += p.total || 0;
-      mapa[key].cantidad += 1;
-    });
-    return Object.entries(mapa)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([, v]) => v);
-  }, [pedidosReales, vistaVentas]);
+    return [...ventasDiarias]
+      .sort((a, b) => a.id.localeCompare(b.id))
+      .map((v) => ({ fecha: new Date(v.id + 'T12:00:00'), total: v.total || 0, cantidad: v.cantidadPedidos || 0 }));
+  }, [ventasDiarias, vistaVentas]);
+
+  // Ranking de platos más pedidos: en Día, sale de los pedidos (igual que
+  // antes); en Semana/Mes, sale de los mapas `platos` ya sumados en cada
+  // documento de ventasDiarias — evita releer todos los pedidos del período.
+  const rankingPlatos = useMemo(() => {
+    const conteo = {};
+    if (vistaVentas === 'dia') {
+      pedidosReales.forEach((p) => {
+        (p.items || []).forEach((item) => {
+          conteo[item.nombre] = (conteo[item.nombre] || 0) + 1;
+        });
+      });
+    } else {
+      ventasDiarias.forEach((v) => {
+        Object.values(v.platos || {}).forEach(({ nombre, cantidad }) => {
+          conteo[nombre] = (conteo[nombre] || 0) + (cantidad || 0);
+        });
+      });
+    }
+    return Object.entries(conteo).sort((a, b) => b[1] - a[1]).slice(0, 10);
+  }, [vistaVentas, pedidosReales, ventasDiarias]);
 
   const mesasActivas = useMemo(() => {
     const activos = pedidos.filter((p) => p.estado !== 'archivado' && p.tipo !== 'llamada');
@@ -169,7 +192,7 @@ export default function Admin() {
     const yBase = nombreRestaurante ? 50 : 42;
     const labelTotal = vistaVentas === 'dia' ? 'Total del día' : vistaVentas === 'semana' ? 'Total de la semana' : 'Total del mes';
     pdf.text(`${labelTotal}: RD$${totalDia}`, 15, yBase);
-    pdf.text(`Pedidos: ${pedidosReales.length}  |  Promedio: RD$${ticketPromedio}`, 15, yBase + 8);
+    pdf.text(`Pedidos: ${cantidadPedidosPeriodo}  |  Promedio: RD$${ticketPromedio}`, 15, yBase + 8);
     pdf.line(15, yBase + 13, 195, yBase + 13);
 
     let y = yBase + 21;
@@ -191,20 +214,11 @@ export default function Admin() {
     }
 
     // Platos más pedidos
-    const conteo = {};
-    pedidosReales.forEach((p) => {
-      (p.items || []).forEach((item) => {
-        if (!conteo[item.nombre]) conteo[item.nombre] = 0;
-        conteo[item.nombre] += 1;
-      });
-    });
-    const ranking = Object.entries(conteo).sort((a, b) => b[1] - a[1]).slice(0, 10);
-
     pdf.setFontSize(12);
     pdf.text('Platos más pedidos:', 15, y);
     y += 7;
     pdf.setFontSize(10);
-    ranking.forEach(([nombre, cantidad], i) => {
+    rankingPlatos.forEach(([nombre, cantidad], i) => {
       if (y > 270) { pdf.addPage(); y = 15; }
       pdf.text(`${i + 1}. ${nombre} — ${cantidad} ${cantidad === 1 ? 'vez' : 'veces'}`, 20, y);
       y += 7;
@@ -266,6 +280,17 @@ export default function Admin() {
     if (vistaVentas === 'dia') return subscribePedidosDia(restauranteId, fechaFiltro, setPedidos);
     return subscribePedidosPeriodo(restauranteId, rangoPeriodo.inicio, rangoPeriodo.fin, setPedidos);
   }, [restauranteId, fechaFiltro, acceso, vistaVentas, rangoPeriodo]);
+
+  // ─── Effect 2b: ventas diarias agregadas (solo semana/mes) ───────────────
+  // En vista Día no se suscribe (los memos de arriba ignoran ventasDiarias
+  // mientras vistaVentas === 'dia', así que dejar el estado anterior sin
+  // limpiar aquí es inofensivo y evita un setState síncrono dentro del efecto).
+  useEffect(() => {
+    if (acceso !== true || vistaVentas === 'dia') return;
+    return subscribeVentasDiarias(
+      restauranteId, localDateStr(rangoPeriodo.inicio), localDateStr(rangoPeriodo.fin), setVentasDiarias
+    );
+  }, [restauranteId, acceso, vistaVentas, rangoPeriodo]);
 
   // ─── Acciones ─────────────────────────────────────────────
   const cerrarSesion = () => logout().catch(console.error);
@@ -652,13 +677,6 @@ export default function Admin() {
         <div className="border border-neutral-800 p-6 mt-8">
           <h2 className="text-amber-400 text-xs tracking-widest uppercase mb-4">Ventas</h2>
 
-          {/* Aviso de límite de datos */}
-          {vistaVentas !== 'dia' && pedidos.length >= 500 && (
-            <div className="border border-amber-400 text-amber-400 text-xs px-3 py-2 mb-4">
-              ⚠ Se muestran los 500 pedidos más recientes. Los totales pueden estar incompletos.
-            </div>
-          )}
-
           {/* Tabs */}
           <div className="flex border border-neutral-700 mb-4 w-fit">
             {['dia', 'semana', 'mes'].map((v) => (
@@ -733,7 +751,7 @@ export default function Admin() {
             </div>
             <div className="border border-neutral-700 p-4">
               <p className="text-neutral-400 text-xs tracking-widest uppercase">Pedidos</p>
-              <p className="text-2xl font-bold text-amber-400 mt-1">{pedidosReales.length}</p>
+              <p className="text-2xl font-bold text-amber-400 mt-1">{cantidadPedidosPeriodo}</p>
             </div>
             <div className="border border-neutral-700 p-4">
               <p className="text-neutral-400 text-xs tracking-widest uppercase">Promedio</p>
@@ -805,19 +823,11 @@ export default function Admin() {
                 : `Basado en pedidos del ${fechaSeleccionada.toLocaleDateString('es-DO', { month: 'long', day: 'numeric' })}`}
             </p>
             {(() => {
-              const conteo = {};
-              pedidosReales.forEach((p) => {
-                (p.items || []).forEach((item) => {
-                  if (!conteo[item.nombre]) conteo[item.nombre] = 0;
-                  conteo[item.nombre] += 1;
-                });
-              });
-              const ranking = Object.entries(conteo).sort((a, b) => b[1] - a[1]).slice(0, 10);
-              if (ranking.length === 0) return <p className="text-neutral-500 text-sm">No hay datos todavía.</p>;
-              const maximo = ranking[0][1];
+              if (rankingPlatos.length === 0) return <p className="text-neutral-500 text-sm">No hay datos todavía.</p>;
+              const maximo = rankingPlatos[0][1];
               return (
                 <div className="space-y-3">
-                  {ranking.map(([nombre, cantidad], i) => (
+                  {rankingPlatos.map(([nombre, cantidad], i) => (
                     <div key={nombre}>
                       <div className="flex justify-between items-center mb-1">
                         <span className="text-sm text-white">

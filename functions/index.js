@@ -7,6 +7,12 @@ const { getAuth } = require('firebase-admin/auth');
 initializeApp();
 const db = getFirestore();
 
+// República Dominicana: UTC-4 fijo todo el año, sin horario de verano — así
+// un pedido de las 11pm no cae en el día equivocado en ventasDiarias.
+function fechaLocalRD() {
+  return new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
 /**
  * crearPedido — callable Cloud Function.
  *
@@ -73,6 +79,7 @@ exports.crearPedido = onCall({ region: 'us-central1', timeoutSeconds: 30, minIns
         nombreEn: plato.nombreEn || null,
         precio: plato.precio,   // server price — cannot be spoofed
         tiempoMin: plato.tiempoMin || 0,
+        platoId: items[i].id,  // clave estable para el ranking en ventasDiarias
       });
       subtotal += plato.precio;
     }
@@ -180,6 +187,31 @@ exports.crearPedido = onCall({ region: 'us-central1', timeoutSeconds: 30, minIns
         'stats.mesasPendientes': FieldValue.increment(1),
       });
     }
+
+    // ── Agregación de ventas diarias ────────────────────────────────────────
+    // Un documento por día (restaurantes/{id}/ventasDiarias/{YYYY-MM-DD}) con
+    // totales y ranking de platos ya sumados, para que Admin.jsx no dependa de
+    // leer todos los pedidos del período (eso es lo que causaba que semana/mes
+    // se truncaran a 500 documentos y mintieran el total). Se agrupa por
+    // platoId antes de escribir para no pisar el mismo campo dos veces dentro
+    // de la misma transacción si el pedido repite un plato.
+    const conteoPlatos = {};
+    itemsValidados.forEach((item) => {
+      if (!conteoPlatos[item.platoId]) conteoPlatos[item.platoId] = { nombre: item.nombre, cantidad: 0 };
+      conteoPlatos[item.platoId].cantidad += 1;
+    });
+    const platosField = {};
+    Object.entries(conteoPlatos).forEach(([platoId, { nombre, cantidad }]) => {
+      platosField[platoId] = { nombre, cantidad: FieldValue.increment(cantidad) };
+    });
+    tx.set(db.doc(`restaurantes/${restauranteId}/ventasDiarias/${fechaLocalRD()}`), {
+      total: FieldValue.increment(total),
+      subtotal: FieldValue.increment(subtotal),
+      itbis: FieldValue.increment(itbis),
+      propina: FieldValue.increment(propina),
+      cantidadPedidos: FieldValue.increment(1),
+      platos: platosField,
+    }, { merge: true });
 
     return { pedidoId: nuevoPedidoRef.id, total };
   });

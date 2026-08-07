@@ -1,5 +1,5 @@
 import {
-  collection, doc, query, where, orderBy, limit, Timestamp,
+  collection, doc, query, where, orderBy, limit, Timestamp, documentId,
   onSnapshot, getDocs, writeBatch, serverTimestamp, increment, enableNetwork,
   runTransaction,
 } from 'firebase/firestore';
@@ -85,7 +85,7 @@ export async function crearPedidoDirecto(restauranteId, { mesa, carrito, subtota
   const ref = doc(pedidosRef);
   batch.set(ref, {
     mesa,
-    items: carrito.map((p) => ({ nombre: p.nombre, nombreEn: p.nombreEn || null, precio: p.precio, tiempoMin: p.tiempoMin || 0 })),
+    items: carrito.map((p) => ({ nombre: p.nombre, nombreEn: p.nombreEn || null, precio: p.precio, tiempoMin: p.tiempoMin || 0, platoId: p.id })),
     subtotal,
     itbis,
     propina,
@@ -104,6 +104,20 @@ export async function crearPedidoDirecto(restauranteId, { mesa, carrito, subtota
   }
   return batch.commit();
 }
+
+// ── Ventas diarias agregadas (escritas solo por la Cloud Function crearPedido) ──
+// Rango por ID de documento (YYYY-MM-DD ordena igual lexicográfica y
+// cronológicamente) — a lo sumo ~31 lecturas por mes, sin índice compuesto.
+export const subscribeVentasDiarias = (restauranteId, fechaInicioStr, fechaFinStr, onChange, onError) =>
+  onSnapshot(
+    query(
+      collection(db, 'restaurantes', restauranteId, 'ventasDiarias'),
+      where(documentId(), '>=', fechaInicioStr),
+      where(documentId(), '<=', fechaFinStr)
+    ),
+    (snap) => onChange(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
+    onError
+  );
 
 export function actualizarEstadoPedidos(restauranteId, ids, estado) {
   if (estado !== 'archivado') {
