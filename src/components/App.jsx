@@ -1,6 +1,6 @@
 import { Component, useState, useEffect, lazy, Suspense } from "react";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
-import { suscribirEstadoAuth, esMaestroAsync } from "../services/authService";
+import { suscribirEstadoAuth, esMaestroAsync, esMaestroOriginal } from "../services/authService";
 
 class ErrorBoundary extends Component {
   state = { crashed: false };
@@ -75,7 +75,9 @@ function RutaMaestro({ usuario }) {
   const [esMaestroActual, setEsMaestroActual] = useState(false);
 
   useEffect(() => {
-    if (!usuario) return; // sin usuario, el render de abajo ya muestra <Login/> directo
+    // El UID original no necesita el chequeo async — evita el viaje a
+    // Firestore (y el parpadeo de carga) en el caso común del dueño real.
+    if (!usuario || esMaestroOriginal()) return;
     let vivo = true;
     esMaestroAsync(usuario.uid)
       .then((res) => { if (vivo) setEsMaestroActual(res); })
@@ -85,6 +87,7 @@ function RutaMaestro({ usuario }) {
   }, [usuario]);
 
   if (!usuario) return <Login />;
+  if (esMaestroOriginal()) return <PanelMaestro />;
   if (verificando) return <div className="min-h-screen bg-neutral-950" />;
   return esMaestroActual ? <PanelMaestro /> : <Login />;
 }
