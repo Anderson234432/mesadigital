@@ -1,6 +1,7 @@
 import {
   signInWithEmailAndPassword,
   signInAnonymously,
+  signInWithCustomToken,
   signOut,
   sendPasswordResetEmail,
   onAuthStateChanged,
@@ -9,6 +10,11 @@ import { auth } from '../firebase';
 
 export const loginEmail = (email, password) =>
   signInWithEmailAndPassword(auth, email, password);
+
+// Usado tras canjear una invitación: la Cloud Function canjearInvitacion crea
+// la cuenta server-side y devuelve un custom token para iniciar sesión con ella.
+export const loginConCustomToken = (token) =>
+  signInWithCustomToken(auth, token);
 
 export const loginAnonimo = () => signInAnonymously(auth);
 

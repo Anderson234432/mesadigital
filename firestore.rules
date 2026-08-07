@@ -154,5 +154,20 @@ service cloud.firestore {
         allow read, write: if esMaestro();
       }
     }
+
+    // ── Invitaciones de registro (admin/cocina) ─────────────────────────────────
+    // Colección top-level, no subcolección: el token ES el ID del documento, así
+    // la pantalla de registro hace un getDoc directo por ID sin necesitar query.
+    // `get` (leer por token, sin sesión) y `list` (enumerar) son operaciones
+    // separadas en Firestore Rules — se permite la primera para que /invitacion/
+    // :token pueda validar antes de pedir datos, y se niega la segunda a
+    // cualquiera que no sea el maestro, para que nadie pueda enumerar invitaciones
+    // válidas. Otorgar el rol y marcar la invitación como usada NO pasa por estas
+    // reglas — lo hace la Cloud Function canjearInvitacion con Admin SDK.
+    match /invitaciones/{token} {
+      allow get: if true;
+      allow list: if esMaestro();
+      allow create, update, delete: if esMaestro();
+    }
   }
 }

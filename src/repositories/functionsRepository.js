@@ -9,3 +9,12 @@ export function getCrearPedidoFn() {
   }
   return _crearPedidoFn;
 }
+
+let _canjearInvitacionFn = null;
+
+export function getCanjearInvitacionFn() {
+  if (!_canjearInvitacionFn) {
+    _canjearInvitacionFn = httpsCallable(getFunctions(getApps()[0]), 'canjearInvitacion');
+  }
+  return _canjearInvitacionFn;
+}

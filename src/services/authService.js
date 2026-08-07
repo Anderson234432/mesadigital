@@ -4,6 +4,8 @@ export const login = (email, password) => authRepo.loginEmail(email, password);
 
 export const loginAnonimo = () => authRepo.loginAnonimo();
 
+export const loginConCustomToken = (token) => authRepo.loginConCustomToken(token);
+
 export const logout = () => authRepo.logout();
 
 export const recuperarPassword = (email) => authRepo.recuperarPassword(email);

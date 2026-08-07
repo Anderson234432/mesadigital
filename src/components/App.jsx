@@ -49,6 +49,7 @@ const Admin = lazy(() => import("./Admin"));
 const Cocina = lazy(() => import("./Cocina"));
 const PanelMaestro = lazy(() => import("./PanelMaestro"));
 const Login = lazy(() => import("./Login"));
+const Invitacion = lazy(() => import("./Invitacion"));
 
 function Landing() {
   return (
@@ -97,6 +98,7 @@ function App() {
         <Suspense fallback={<div className="min-h-screen bg-neutral-950" />}>
           <Routes>
           <Route path="/" element={<Landing />} />
+          <Route path="/invitacion/:token" element={<Invitacion />} />
           <Route path="/restaurante/:restauranteId/menu/:numeroMesa" element={<Menu />} />
           <Route path="/restaurante/:restauranteId/admin" element={usuario ? <Admin /> : <Login />} />
           <Route path="/restaurante/:restauranteId/cocina" element={usuario ? <Cocina /> : <Login />} />

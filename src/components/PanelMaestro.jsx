@@ -6,6 +6,7 @@ import {
   subscribeMesaTokens,
 } from '../services/restaurantesService';
 import { logout } from '../services/authService';
+import { crearInvitacion, subscribeInvitacionesPendientes, revocarInvitacion } from '../services/invitacionesService';
 
 function generarTokenMesa() {
   return typeof crypto?.randomUUID === 'function'
@@ -25,6 +26,10 @@ function PanelMaestro() {
   const [accesoAbierto, setAccesoAbierto] = useState(null);
   const [nuevoUid, setNuevoUid] = useState({});
   const [mesaTokensPorRestaurante, setMesaTokensPorRestaurante] = useState({});
+  const [invitacionesPorRestaurante, setInvitacionesPorRestaurante] = useState({});
+  const [linkInvitacion, setLinkInvitacion] = useState(null); // { restauranteId, rol, token }
+  const [invitando, setInvitando] = useState(false);
+  const [confirmarRevocarToken, setConfirmarRevocarToken] = useState(null);
 
   useEffect(() => {
     return subscribeRestaurantes(setRestaurantes);
@@ -44,6 +49,44 @@ function PanelMaestro() {
     return () => unsubs.forEach((u) => u());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [idsRestaurantes]);
+
+  // Invitaciones pendientes por restaurante — mismo patrón que mesaTokens arriba.
+  useEffect(() => {
+    const unsubs = restaurantes.map((r) =>
+      subscribeInvitacionesPendientes(r.id, (invitaciones) => {
+        setInvitacionesPorRestaurante((prev) => ({ ...prev, [r.id]: invitaciones }));
+      })
+    );
+    return () => unsubs.forEach((u) => u());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [idsRestaurantes]);
+
+  async function handleInvitar(restauranteId, rol) {
+    if (invitando) return;
+    setInvitando(true);
+    try {
+      const token = await crearInvitacion(restauranteId, rol);
+      setLinkInvitacion({ restauranteId, rol, token });
+    } catch (e) {
+      console.error('Error creando invitación:', e);
+    } finally {
+      setInvitando(false);
+    }
+  }
+
+  async function handleRevocarInvitacion(token) {
+    try {
+      await revocarInvitacion(token);
+    } catch (e) {
+      console.error('Error revocando invitación:', e);
+    } finally {
+      setConfirmarRevocarToken(null);
+    }
+  }
+
+  function urlInvitacion(token) {
+    return `${import.meta.env.VITE_BASE_URL || window.location.origin}/invitacion/${token}`;
+  }
 
   // Número de mesas a mostrar: lo que el maestro tocó en esta sesión,
   // o si no, lo que ya está guardado en Firestore.
@@ -290,6 +333,73 @@ function PanelMaestro() {
                         Agregar
                       </button>
                     </div>
+                  </div>
+
+                  {/* Invitaciones — la persona crea su propia cuenta, el maestro
+                      nunca conoce su contraseña */}
+                  <div>
+                    <p className="text-xs text-amber-400 tracking-widest uppercase mb-2">Invitaciones</p>
+                    <div className="flex gap-2 mb-3">
+                      <button onClick={() => handleInvitar(r.id, 'admin')} disabled={invitando}
+                        className="text-xs border border-neutral-600 text-neutral-400 px-3 py-2 hover:border-amber-400 hover:text-amber-400 transition-colors min-h-[44px] disabled:opacity-50">
+                        Invitar admin
+                      </button>
+                      <button onClick={() => handleInvitar(r.id, 'cocina')} disabled={invitando}
+                        className="text-xs border border-neutral-600 text-neutral-400 px-3 py-2 hover:border-amber-400 hover:text-amber-400 transition-colors min-h-[44px] disabled:opacity-50">
+                        Invitar cocina
+                      </button>
+                    </div>
+
+                    {linkInvitacion?.restauranteId === r.id && (
+                      <div className="border border-amber-400 border-opacity-30 bg-amber-400 bg-opacity-5 p-3 mb-3">
+                        <p className="text-neutral-400 text-xs mb-2">
+                          Enlace de invitación ({linkInvitacion.rol === 'admin' ? 'admin' : 'cocina'}) — válido 7 días:
+                        </p>
+                        <div className="flex gap-2 items-center">
+                          <span className="text-neutral-500 text-xs font-mono truncate flex-1">
+                            {urlInvitacion(linkInvitacion.token)}
+                          </span>
+                          <button
+                            onClick={async () => {
+                              try { await navigator.clipboard.writeText(urlInvitacion(linkInvitacion.token)); }
+                              catch { /* no-op: fallback silencioso si el portapapeles falla */ }
+                            }}
+                            className="text-xs bg-amber-400 text-black px-3 py-1 font-bold hover:bg-amber-300 min-h-[44px] shrink-0">
+                            Copiar
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {(invitacionesPorRestaurante[r.id] || []).length === 0 ? (
+                      <p className="text-neutral-600 text-xs">Sin invitaciones pendientes</p>
+                    ) : (
+                      invitacionesPorRestaurante[r.id].map((inv) => (
+                        <div key={inv.id} className="flex items-center justify-between mb-1">
+                          <span className="text-neutral-400 text-xs">
+                            {inv.rol === 'admin' ? 'Admin' : 'Cocina'} — vence{' '}
+                            {inv.expiraEn?.toDate().toLocaleDateString('es-DO', { day: 'numeric', month: 'short' })}
+                          </span>
+                          {confirmarRevocarToken === inv.id ? (
+                            <span className="flex gap-2 items-center shrink-0">
+                              <button onClick={() => handleRevocarInvitacion(inv.id)}
+                                className="text-xs text-red-400 hover:text-red-300 min-h-[44px] inline-flex items-center">
+                                Sí, revocar
+                              </button>
+                              <button onClick={() => setConfirmarRevocarToken(null)}
+                                className="text-xs text-neutral-500 min-h-[44px] inline-flex items-center">
+                                No
+                              </button>
+                            </span>
+                          ) : (
+                            <button onClick={() => setConfirmarRevocarToken(inv.id)}
+                              className="text-xs text-red-400 hover:text-red-300 shrink-0 min-h-[44px] inline-flex items-center">
+                              Revocar
+                            </button>
+                          )}
+                        </div>
+                      ))
+                    )}
                   </div>
 
                 </div>

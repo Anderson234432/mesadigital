@@ -38,6 +38,13 @@ export async function verificarAccesoCocina(restauranteId) {
   );
 }
 
+// Lectura puntual y pública (sin sesión) — usada por /invitacion/:token para
+// mostrar el nombre del restaurante antes de que la persona se registre.
+export async function obtenerNombreRestaurante(restauranteId) {
+  const snap = await repo.obtenerRestaurante(restauranteId);
+  return snap.exists() ? (snap.data().nombre || '') : null;
+}
+
 export function subscribeRestaurante(restauranteId, cb) {
   return repo.subscribeRestaurante(
     restauranteId,
