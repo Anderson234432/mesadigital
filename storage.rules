@@ -1,13 +1,32 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
+
+    // ── Ruta vieja (sin restauranteId) ──────────────────────────────────────
+    // Ya no acepta escrituras nuevas: sin restauranteId en el path no hay forma
+    // de verificar a qué restaurante pertenece una imagen, así que un admin de
+    // cualquier restaurante podía sobrescribir/borrar fotos de cualquier otro.
+    // Las imágenes ya subidas aquí se siguen sirviendo (lectura pública) — no
+    // se migran, ver INVENTARIO/plan de la corrección.
     match /platos/{allPaths=**} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // ── Ruta nueva, aislada por restaurante ──────────────────────────────────
+    match /restaurantes/{restauranteId}/platos/{allPaths=**} {
       // Imágenes del menú: lectura pública (clientes las ven en el menú)
       allow read: if true;
-      // Solo staff autenticado con email/password puede subir o eliminar
-      // Los clientes anónimos tienen sign_in_provider == 'anonymous'
+      // Solo staff autenticado (no anónimo) que sea admin de ESTE restaurante,
+      // o el maestro, puede subir o eliminar. firestore.get() cuesta 1 lectura
+      // de Firestore por escritura — subir/editar un plato es una acción de
+      // staff, poco frecuente, así que el costo es insignificante.
       allow write: if request.auth != null
-        && request.auth.token.firebase.sign_in_provider != 'anonymous';
+        && request.auth.token.firebase.sign_in_provider != 'anonymous'
+        && (
+          request.auth.uid == 'xB7aybhKvYhIkuq7TERTuMfUkaH2' ||
+          request.auth.uid in firestore.get(/databases/(default)/documents/restaurantes/$(restauranteId)).data.get('adminUids', [])
+        );
     }
   }
 }

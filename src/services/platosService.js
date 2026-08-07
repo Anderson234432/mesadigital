@@ -11,7 +11,7 @@ export const subscribePlatos = (restauranteId, cb) =>
 export async function guardarPlato(restauranteId, form, imagen, editandoId) {
   let imagenUrl = form.imagenUrl || '';
   if (imagen) {
-    imagenUrl = await subirImagenPlato(imagen);
+    imagenUrl = await subirImagenPlato(imagen, restauranteId);
   }
 
   const datos = {
