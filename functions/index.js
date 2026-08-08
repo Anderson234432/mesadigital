@@ -222,28 +222,35 @@ exports.crearPedido = onCall({ region: 'us-central1', timeoutSeconds: 30, minIns
 /**
  * canjearInvitacion — callable Cloud Function.
  *
- * Recibe { token, email, password }. Valida la invitación server-side, crea
- * la cuenta de Auth (Admin SDK — nunca en el cliente), y en una transacción
- * otorga el rol y marca la invitación como usada. Todo el paso "crear cuenta
- * + otorgar rol" pasa por aquí, no por Firestore Rules, porque el nuevo
- * usuario nunca tiene permiso directo de escribir adminUids/cocinaUids.
+ * Recibe { token }. El cliente crea su propia cuenta con
+ * createUserWithEmailAndPassword ANTES de llamar aquí (así llega con sesión
+ * real, request.auth.uid poblado). Esta función solo valida la invitación y,
+ * en una transacción, otorga el rol y marca la invitación como usada — eso
+ * no puede pasar por Firestore Rules porque el usuario recién creado nunca
+ * tiene permiso directo de escribir adminUids/cocinaUids.
  *
- * Si la transacción de otorgar el rol falla (p.ej. invitación consumida por
- * otra petición concurrente entre el momento de validarla y el de crear la
- * cuenta), se borra la cuenta recién creada — nunca debe quedar una cuenta
- * de Auth sin rol y sin explicación.
+ * Antes esta función también creaba la cuenta (Admin SDK) y devolvía un
+ * custom token para iniciar sesión. Se quitó: createCustomToken requiere el
+ * permiso IAM 'iam.serviceAccounts.signBlob' sobre la cuenta de servicio de
+ * Cloud Functions, que este proyecto no tiene otorgado — reventaba con un
+ * error no controlado en cada canje (ver firebase functions:log). Si se
+ * quiere restaurar ese diseño, hay que otorgar el rol "Service Account Token
+ * Creator" a la cuenta de servicio de Cloud Functions sobre sí misma.
+ *
+ * Si la transacción de otorgar el rol falla (invitación consumida por otra
+ * petición concurrente, o ya no válida), la cuenta de Auth ya existe pero
+ * sin rol — el cliente cae en la pantalla de "Sin acceso" de Admin/Cocina,
+ * que ya expone el UID para que el maestro lo agregue a mano.
  */
 exports.canjearInvitacion = onCall({ region: 'us-central1', timeoutSeconds: 30, enforceAppCheck: true }, async (request) => {
-  const { token, email, password } = request.data;
+  const { token } = request.data;
+  const uid = request.auth?.uid;
 
+  if (!uid) {
+    throw new HttpsError('unauthenticated', 'Debes iniciar sesión antes de canjear la invitación.');
+  }
   if (!token || typeof token !== 'string') {
     throw new HttpsError('invalid-argument', 'Invitación inválida.');
-  }
-  if (!email || typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    throw new HttpsError('invalid-argument', 'Correo inválido.');
-  }
-  if (!password || typeof password !== 'string' || password.length < 8) {
-    throw new HttpsError('invalid-argument', 'La contraseña debe tener al menos 8 caracteres.');
   }
 
   const invitacionRef = db.doc(`invitaciones/${token}`);
@@ -271,41 +278,19 @@ exports.canjearInvitacion = onCall({ region: 'us-central1', timeoutSeconds: 30, 
     throw new HttpsError('failed-precondition', 'El restaurante de esta invitación ya no existe.');
   }
 
-  // ── Crear la cuenta ANTES de tocar la invitación: si falla aquí (correo ya
-  // registrado, contraseña rechazada), la invitación sigue intacta y el
-  // usuario puede reintentar con otro correo — no queda nada a medias.
-  let uid;
-  try {
-    const userRecord = await getAuth().createUser({ email, password });
-    uid = userRecord.uid;
-  } catch (e) {
-    if (e.code === 'auth/email-already-exists') {
-      throw new HttpsError('already-exists', 'Ya existe una cuenta con este correo.');
-    }
-    throw new HttpsError('invalid-argument', 'No se pudo crear la cuenta. Verifica el correo y la contraseña.');
-  }
-
   const campoRol = inv.rol === 'admin' ? 'adminUids' : 'cocinaUids';
 
-  try {
-    await db.runTransaction(async (tx) => {
-      const freshSnap = await tx.get(invitacionRef);
-      const fresh = freshSnap.data();
-      if (!freshSnap.exists || fresh.revocada || fresh.usadaPor || !fresh.expiraEn || fresh.expiraEn.toMillis() < Date.now()) {
-        throw new HttpsError('failed-precondition', 'Esta invitación ya no es válida.');
-      }
-      tx.update(restauranteRef, { [campoRol]: FieldValue.arrayUnion(uid) });
-      tx.update(invitacionRef, { usadaPor: uid, usadaEn: FieldValue.serverTimestamp() });
-    });
-  } catch (e) {
-    // Compensación: nunca dejar una cuenta de Auth sin rol y sin explicación.
-    await getAuth().deleteUser(uid).catch(() => {});
-    if (e instanceof HttpsError) throw e;
-    throw new HttpsError('internal', 'No se pudo completar el registro. Intenta de nuevo.');
-  }
+  await db.runTransaction(async (tx) => {
+    const freshSnap = await tx.get(invitacionRef);
+    const fresh = freshSnap.data();
+    if (!freshSnap.exists || fresh.revocada || fresh.usadaPor || !fresh.expiraEn || fresh.expiraEn.toMillis() < Date.now()) {
+      throw new HttpsError('failed-precondition', 'Esta invitación ya no es válida.');
+    }
+    tx.update(restauranteRef, { [campoRol]: FieldValue.arrayUnion(uid) });
+    tx.update(invitacionRef, { usadaPor: uid, usadaEn: FieldValue.serverTimestamp() });
+  });
 
-  const customToken = await getAuth().createCustomToken(uid);
-  return { customToken, restauranteId: inv.restauranteId, rol: inv.rol };
+  return { restauranteId: inv.restauranteId, rol: inv.rol };
 });
 
 // ── Limpieza semanal de usuarios anónimos (>30 días sin actividad) ─────────

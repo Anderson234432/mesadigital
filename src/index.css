@@ -3,6 +3,14 @@
 @tailwind utilities;
 #print-area { display: block; }
 
+/* Login.jsx e Invitacion.jsx ya traen su propio botón de mostrar/ocultar
+   contraseña — sin esto, Edge superpone además su propio ícono de ojo nativo
+   sobre inputs type="password". */
+input[type="password"]::-ms-reveal,
+input[type="password"]::-ms-clear {
+  display: none;
+}
+
 @media print {
   .no-print { display: none !important; }
   body * { visibility: hidden; }

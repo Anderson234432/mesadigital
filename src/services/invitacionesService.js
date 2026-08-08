@@ -1,7 +1,7 @@
 import { Timestamp } from 'firebase/firestore';
 import * as invitacionesRepo from '../repositories/invitacionesRepository';
 import { getCanjearInvitacionFn } from '../repositories/functionsRepository';
-import { loginConCustomToken } from './authService';
+import { registrarEmail } from './authService';
 
 const DIAS_EXPIRACION = 7;
 
@@ -41,17 +41,13 @@ export async function validarInvitacion(token) {
   return { valida: true, restauranteId: inv.restauranteId, rol: inv.rol };
 }
 
-export async function canjearInvitacion({ token, email, password }) {
-  const { data } = await getCanjearInvitacionFn()({ token, email, password });
-  await loginConCustomToken(data.customToken);
-  return { restauranteId: data.restauranteId, rol: data.rol };
-}
+// Dos pasos separados (no uno combinado) a propósito: el componente necesita
+// distinguir "no se pudo crear la cuenta" (la invitación sigue intacta, se
+// puede reintentar) de "la cuenta se creó pero no se pudo asignar el rol"
+// (son mensajes y siguientes pasos distintos para quien se está registrando).
+export const crearCuentaInvitado = (email, password) => registrarEmail(email, password);
 
-export function parsearErrorInvitacion(e) {
-  const code = (e?.code || '').toLowerCase();
-  if (code.includes('already-exists')) return 'Ya existe una cuenta con este correo.';
-  if (code.includes('failed-precondition')) return 'Esta invitación ya no es válida. Pide una nueva.';
-  if (code.includes('not-found')) return 'Este enlace de invitación no es válido.';
-  if (code.includes('invalid-argument')) return 'Revisa el correo y la contraseña e intenta de nuevo.';
-  return 'No se pudo completar el registro. Intenta de nuevo.';
+export async function otorgarRolInvitacion(token) {
+  const { data } = await getCanjearInvitacionFn()({ token });
+  return { restauranteId: data.restauranteId, rol: data.rol };
 }

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { validarInvitacion, canjearInvitacion, parsearErrorInvitacion } from '../services/invitacionesService';
+import { validarInvitacion, crearCuentaInvitado, otorgarRolInvitacion } from '../services/invitacionesService';
+import { enviarVerificacionEmail } from '../services/authService';
 import { obtenerNombreRestaurante } from '../services/restaurantesService';
 
 const MOTIVO_MENSAJE = {
@@ -55,11 +56,30 @@ function Invitacion() {
     if (password !== confirmar) { setError('Las contraseñas no coinciden.'); return; }
     setEnviando(true);
     setError('');
+
+    // Paso 1: crear la cuenta. Si falla, la invitación sigue intacta (nunca
+    // se llegó a llamar la Cloud Function) — se puede reintentar.
     try {
-      const { restauranteId, rol } = await canjearInvitacion({ token, email, password });
+      await crearCuentaInvitado(email, password);
+    } catch (e) {
+      if (e?.code === 'auth/email-already-in-use') {
+        setError('Ya existe una cuenta con este correo. Inicia sesión y pídele al maestro que te asigne el acceso.');
+      } else {
+        setError(`No se pudo crear la cuenta: ${e?.message || 'error desconocido'}`);
+      }
+      setEnviando(false);
+      return;
+    }
+
+    // Paso 2: otorgar el rol. Si falla aquí, la cuenta YA existe (con sesión
+    // iniciada) pero sin rol — Admin/Cocina ya tienen una pantalla de "Sin
+    // acceso" con el UID visible para que el maestro lo agregue a mano.
+    try {
+      const { restauranteId, rol } = await otorgarRolInvitacion(token);
+      enviarVerificacionEmail().catch((e) => console.error('No se pudo enviar el correo de verificación:', e));
       navigate(`/restaurante/${restauranteId}/${rol}`, { replace: true });
     } catch (e) {
-      setError(parsearErrorInvitacion(e));
+      setError(`Tu cuenta se creó, pero no se pudo asignar el acceso: ${e?.message || 'error desconocido'}. Pide al maestro que te agregue manualmente con tu correo.`);
       setEnviando(false);
     }
   }

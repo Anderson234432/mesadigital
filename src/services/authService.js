@@ -5,7 +5,11 @@ export const login = (email, password) => authRepo.loginEmail(email, password);
 
 export const loginAnonimo = () => authRepo.loginAnonimo();
 
-export const loginConCustomToken = (token) => authRepo.loginConCustomToken(token);
+export const registrarEmail = (email, password) => authRepo.registrarEmail(email, password);
+
+export const enviarVerificacionEmail = () => authRepo.enviarVerificacionEmail();
+
+export const emailVerificado = () => authRepo.emailVerificado();
 
 export const logout = () => authRepo.logout();
 

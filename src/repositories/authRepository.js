@@ -1,7 +1,8 @@
 import {
   signInWithEmailAndPassword,
   signInAnonymously,
-  signInWithCustomToken,
+  createUserWithEmailAndPassword,
+  sendEmailVerification,
   signOut,
   sendPasswordResetEmail,
   onAuthStateChanged,
@@ -11,10 +12,12 @@ import { auth } from '../firebase';
 export const loginEmail = (email, password) =>
   signInWithEmailAndPassword(auth, email, password);
 
-// Usado tras canjear una invitación: la Cloud Function canjearInvitacion crea
-// la cuenta server-side y devuelve un custom token para iniciar sesión con ella.
-export const loginConCustomToken = (token) =>
-  signInWithCustomToken(auth, token);
+// Usado al canjear una invitación: crea la cuenta y deja al usuario
+// autenticado en el cliente (sin pasar por Admin SDK ni custom tokens).
+export const registrarEmail = (email, password) =>
+  createUserWithEmailAndPassword(auth, email, password);
+
+export const enviarVerificacionEmail = () => sendEmailVerification(auth.currentUser);
 
 export const loginAnonimo = () => signInAnonymously(auth);
 
@@ -25,3 +28,5 @@ export const recuperarPassword = (email) => sendPasswordResetEmail(auth, email);
 export const suscribirEstadoAuth = (cb) => onAuthStateChanged(auth, cb);
 
 export const getUsuarioActual = () => auth.currentUser;
+
+export const emailVerificado = () => auth.currentUser?.emailVerified ?? true;
