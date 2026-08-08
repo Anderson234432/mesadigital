@@ -2,7 +2,6 @@ import {
   signInWithEmailAndPassword,
   signInAnonymously,
   signInWithCustomToken,
-  sendEmailVerification,
   signOut,
   sendPasswordResetEmail,
   onAuthStateChanged,
@@ -18,8 +17,6 @@ export const loginEmail = (email, password) =>
 export const loginConCustomToken = (token) =>
   signInWithCustomToken(auth, token);
 
-export const enviarVerificacionEmail = () => sendEmailVerification(auth.currentUser);
-
 export const loginAnonimo = () => signInAnonymously(auth);
 
 export const logout = () => signOut(auth);
@@ -29,5 +26,3 @@ export const recuperarPassword = (email) => sendPasswordResetEmail(auth, email);
 export const suscribirEstadoAuth = (cb) => onAuthStateChanged(auth, cb);
 
 export const getUsuarioActual = () => auth.currentUser;
-
-export const emailVerificado = () => auth.currentUser?.emailVerified ?? true;

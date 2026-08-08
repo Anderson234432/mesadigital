@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom';
 import { verificarAccesoAdmin, guardarTiempos, guardarImpuestos } from '../services/restaurantesService';
 import { subscribePlatos, guardarPlato, eliminarPlato, toggleDisponible } from '../services/platosService';
 import { subscribePedidosDia, subscribePedidosPeriodo, subscribeVentasDiarias, actualizarEstadoMesa } from '../services/pedidosService';
-import { logout, getUid, emailVerificado, enviarVerificacionEmail } from '../services/authService';
+import { logout, getUid } from '../services/authService';
 
 function localDateStr(date = new Date()) {
   const y = date.getFullYear();
@@ -39,8 +39,6 @@ export default function Admin() {
   const [mensaje, setMensaje] = useState({ texto: '', tipo: '' });
   const [confirmarEliminarId, setConfirmarEliminarId] = useState(null);
   const [confirmarCerrarMesaId, setConfirmarCerrarMesaId] = useState(null);
-  const [reenviandoVerificacion, setReenviandoVerificacion] = useState(false);
-  const [verificacionReenviada, setVerificacionReenviada] = useState(false);
 
   const montadoRef = useRef(true);
   useEffect(() => {
@@ -297,19 +295,6 @@ export default function Admin() {
   // ─── Acciones ─────────────────────────────────────────────
   const cerrarSesion = () => logout().catch(console.error);
 
-  const handleReenviarVerificacion = async () => {
-    if (reenviandoVerificacion) return;
-    setReenviandoVerificacion(true);
-    try {
-      await enviarVerificacionEmail();
-      if (montadoRef.current) setVerificacionReenviada(true);
-    } catch (e) {
-      console.error('Error reenviando verificación:', e);
-    } finally {
-      if (montadoRef.current) setReenviandoVerificacion(false);
-    }
-  };
-
   const handleChange = (e) => setForm({ ...form, [e.target.name]: e.target.value });
 
   const guardar = async () => {
@@ -441,21 +426,6 @@ export default function Admin() {
           Cerrar sesión
         </button>
       </div>
-
-      {/* Aviso de correo sin verificar — no bloquea el acceso, solo avisa */}
-      {!emailVerificado() && (
-        <div className="bg-amber-950 border-b border-amber-800 text-amber-300 text-xs px-4 py-3 flex flex-wrap items-center justify-between gap-2">
-          <span>Verifica tu correo para poder recuperar tu contraseña si la olvidas.</span>
-          {verificacionReenviada ? (
-            <span className="text-amber-400 font-bold">Correo reenviado ✓</span>
-          ) : (
-            <button onClick={handleReenviarVerificacion} disabled={reenviandoVerificacion}
-              className="border border-amber-700 px-3 py-1 hover:border-amber-400 hover:text-amber-100 transition-colors disabled:opacity-50 min-h-[44px]">
-              {reenviandoVerificacion ? 'Enviando...' : 'Reenviar correo'}
-            </button>
-          )}
-        </div>
-      )}
 
       {/* Notificación */}
       {mensaje.texto && (

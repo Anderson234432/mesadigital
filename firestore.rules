@@ -184,6 +184,15 @@ service cloud.firestore {
       allow get: if true;
       allow list: if esMaestro();
       allow create, update, delete: if esMaestro();
+
+      // ── Código de verificación + contadores (solo Cloud Function via Admin
+      // SDK) ──────────────────────────────────────────────────────────────────
+      // El hash del código de 6 dígitos, sus intentos y el rate limit de
+      // reenvíos viven aquí. No hay regla que otorgue acceso → nadie desde el
+      // cliente puede leerlos ni escribirlos, bajo ninguna circunstancia.
+      match /_privado/{docId} {
+        allow read, write: if false;
+      }
     }
 
     // ── Lista de co-maestros ────────────────────────────────────────────────────

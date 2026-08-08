@@ -1,6 +1,6 @@
 import { Timestamp } from 'firebase/firestore';
 import * as invitacionesRepo from '../repositories/invitacionesRepository';
-import { getCanjearInvitacionFn } from '../repositories/functionsRepository';
+import { getCanjearInvitacionFn, getEnviarCodigoInvitacionFn } from '../repositories/functionsRepository';
 import { loginConCustomToken } from './authService';
 
 const DIAS_EXPIRACION = 7;
@@ -41,11 +41,20 @@ export async function validarInvitacion(token) {
   return { valida: true, restauranteId: inv.restauranteId, rol: inv.rol };
 }
 
-// canjearInvitacion (Admin SDK) crea la cuenta y otorga el rol atómicamente
-// server-side, y devuelve un custom token — así nunca queda una cuenta sin
-// rol a medio camino, sin importar en qué paso falle.
-export async function canjearInvitacion({ token, email, password }) {
-  const { data } = await getCanjearInvitacionFn()({ token, email, password });
+// enviarCodigoInvitacion (Admin SDK) valida la invitación, verifica que el
+// correo no tenga cuenta ya, y envía un código de 6 dígitos por correo (Resend).
+// No crea nada todavía — si el correo tiene un typo, el código nunca llega y
+// no queda una cuenta huérfana.
+export async function enviarCodigoInvitacion({ token, email }) {
+  await getEnviarCodigoInvitacionFn()({ token, email });
+}
+
+// canjearInvitacion (Admin SDK) revalida la invitación y el código, crea la
+// cuenta y otorga el rol atómicamente server-side, y devuelve un custom token
+// — así nunca queda una cuenta sin rol a medio camino, sin importar en qué
+// paso falle.
+export async function canjearInvitacion({ token, codigo, password }) {
+  const { data } = await getCanjearInvitacionFn()({ token, codigo, password });
   await loginConCustomToken(data.customToken);
   return { restauranteId: data.restauranteId, rol: data.rol };
 }

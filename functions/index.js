@@ -1,16 +1,70 @@
 const { onCall, HttpsError } = require('firebase-functions/v2/https');
 const { onSchedule } = require('firebase-functions/v2/scheduler');
+const { defineSecret } = require('firebase-functions/params');
 const { initializeApp } = require('firebase-admin/app');
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const { getAuth } = require('firebase-admin/auth');
+const crypto = require('node:crypto');
+const { Resend } = require('resend');
 
 initializeApp();
 const db = getFirestore();
+
+const resendApiKey = defineSecret('RESEND_API_KEY');
 
 // República Dominicana: UTC-4 fijo todo el año, sin horario de verano — así
 // un pedido de las 11pm no cae en el día equivocado en ventasDiarias.
 function fechaLocalRD() {
   return new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+// ── Validación compartida por enviarCodigoInvitacion y canjearInvitacion ──────
+function validarInvitacionActiva(inv) {
+  if (inv.revocada) {
+    throw new HttpsError('failed-precondition', 'Esta invitación fue revocada.');
+  }
+  if (inv.usadaPor) {
+    throw new HttpsError('failed-precondition', 'Esta invitación ya fue usada.');
+  }
+  if (!inv.expiraEn || inv.expiraEn.toMillis() < Date.now()) {
+    throw new HttpsError('failed-precondition', 'Esta invitación venció.');
+  }
+  if (inv.rol !== 'admin' && inv.rol !== 'cocina') {
+    throw new HttpsError('failed-precondition', 'Rol de invitación inválido.');
+  }
+}
+
+function escaparHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function hashCodigo(codigo, salt) {
+  return crypto.createHash('sha256').update(`${salt}:${codigo}`).digest('hex');
+}
+
+// Tablas, no flexbox — así se ve razonablemente bien en clientes de correo
+// viejos (Outlook de escritorio, etc.). Sin imágenes externas.
+function plantillaCorreoCodigo({ codigo, nombreRestaurante, rolLabel }) {
+  const nombreSeguro = escaparHtml(nombreRestaurante);
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#0a0a0a;padding:40px 0;">
+  <tr><td align="center">
+    <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="background:#171717;border:1px solid #262626;">
+      <tr><td style="padding:32px 40px;text-align:center;">
+        <p style="color:#fbbf24;font-size:11px;letter-spacing:3px;text-transform:uppercase;margin:0 0 8px;font-family:Georgia,serif;">MesaDigital</p>
+        <h1 style="color:#ffffff;font-size:20px;margin:0 0 24px;font-family:Georgia,serif;">Tu código de acceso</h1>
+        <p style="color:#a3a3a3;font-size:14px;margin:0 0 24px;font-family:Georgia,serif;">
+          Acceso de ${rolLabel} para <strong style="color:#ffffff;">${nombreSeguro}</strong>
+        </p>
+        <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto 24px;">
+          <tr><td style="background:#0a0a0a;border:1px solid #fbbf24;padding:16px 32px;">
+            <span style="font-family:'Courier New',monospace;font-size:32px;letter-spacing:8px;color:#fbbf24;font-weight:bold;">${codigo}</span>
+          </td></tr>
+        </table>
+        <p style="color:#737373;font-size:12px;margin:0;font-family:Georgia,serif;">Este código vence en 10 minutos.</p>
+      </td></tr>
+    </table>
+  </td></tr>
+</table>`;
 }
 
 
@@ -220,29 +274,135 @@ exports.crearPedido = onCall({ region: 'us-central1', timeoutSeconds: 30, minIns
   return resultado;
 });
 
+const CODIGO_EXPIRACION_MS = 10 * 60 * 1000;
+const CODIGO_MAX_INTENTOS = 5;
+const REENVIO_MAX_POR_HORA = 3;
+const REENVIO_WINDOW_MS = 60 * 60 * 1000;
+
+/**
+ * enviarCodigoInvitacion — callable Cloud Function.
+ *
+ * Recibe { token, email }. Verifica que el correo no tenga cuenta ya, genera
+ * un código de 6 dígitos (crypto.randomInt — nunca Math.random), lo guarda
+ * HASHEADO (SHA-256 + sal, nunca en texto plano) en
+ * invitaciones/{token}/_privado/codigo, y lo envía por correo con Resend.
+ *
+ * Verificar el correo con un código ANTES de crear la cuenta (en vez de un
+ * enlace de verificación después) evita el problema real que motivó esto:
+ * un typo en el correo creaba una cuenta permanentemente irrecuperable — el
+ * código nunca llega, nunca se crea nada.
+ */
+exports.enviarCodigoInvitacion = onCall(
+  { region: 'us-central1', timeoutSeconds: 30, enforceAppCheck: true, secrets: [resendApiKey] },
+  async (request) => {
+    const { token, email } = request.data;
+
+    if (!token || typeof token !== 'string') {
+      throw new HttpsError('invalid-argument', 'Invitación inválida.');
+    }
+    if (!email || typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      throw new HttpsError('invalid-argument', 'Correo inválido.');
+    }
+
+    const invitacionRef = db.doc(`invitaciones/${token}`);
+    const invitacionSnap = await invitacionRef.get();
+    if (!invitacionSnap.exists) {
+      throw new HttpsError('not-found', 'Esta invitación no existe.');
+    }
+    const inv = invitacionSnap.data();
+    validarInvitacionActiva(inv);
+
+    const restauranteSnap = await db.doc(`restaurantes/${inv.restauranteId}`).get();
+    if (!restauranteSnap.exists) {
+      throw new HttpsError('failed-precondition', 'El restaurante de esta invitación ya no existe.');
+    }
+
+    // Correo ya registrado: no se manda código, no se toca la invitación.
+    try {
+      await getAuth().getUserByEmail(email);
+      throw new HttpsError('already-exists', 'Ya existe una cuenta con este correo. Inicia sesión y pídele al maestro que te asigne el acceso.');
+    } catch (e) {
+      if (e instanceof HttpsError) throw e;
+      if (e.code !== 'auth/user-not-found') {
+        throw new HttpsError('internal', `No se pudo verificar el correo: ${e.message || 'error desconocido'}`);
+      }
+      // auth/user-not-found es lo esperado: el correo está libre, se continúa.
+    }
+
+    // ── Rate limit: máx 3 códigos por invitación por hora — mismo patrón de
+    // runTransaction (count + windowStart) que el rate limiting de crearPedido.
+    const rateLimitRef = invitacionRef.collection('_privado').doc('rateLimit');
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(rateLimitRef);
+      const now = Date.now();
+      if (snap.exists) {
+        const { count, windowStart } = snap.data();
+        if (now - windowStart < REENVIO_WINDOW_MS) {
+          if (count >= REENVIO_MAX_POR_HORA) {
+            throw new HttpsError('resource-exhausted', 'Demasiados códigos enviados. Espera un poco antes de pedir otro.');
+          }
+          tx.update(rateLimitRef, { count: FieldValue.increment(1) });
+        } else {
+          tx.set(rateLimitRef, { count: 1, windowStart: now });
+        }
+      } else {
+        tx.set(rateLimitRef, { count: 1, windowStart: now });
+      }
+    });
+
+    // ── Generar y guardar el código — hasheado, nunca en texto plano ─────────
+    const codigo = String(crypto.randomInt(100000, 1000000));
+    const salt = crypto.randomBytes(16).toString('hex');
+    await invitacionRef.collection('_privado').doc('codigo').set({
+      hash: hashCodigo(codigo, salt),
+      salt,
+      email,
+      expiraEn: new Date(Date.now() + CODIGO_EXPIRACION_MS),
+      intentos: 0,
+    });
+
+    // ── Enviar el correo con Resend ───────────────────────────────────────────
+    const rolLabel = inv.rol === 'admin' ? 'administrador' : 'cocina';
+    try {
+      const resend = new Resend(resendApiKey.value());
+      await resend.emails.send({
+        from: 'onboarding@resend.dev',
+        to: email,
+        subject: `Tu código de acceso a MesaDigital: ${codigo}`,
+        html: plantillaCorreoCodigo({ codigo, nombreRestaurante: restauranteSnap.data().nombre || 'tu restaurante', rolLabel }),
+      });
+    } catch (e) {
+      throw new HttpsError('internal', `No se pudo enviar el correo: ${e.message || 'error desconocido'}`);
+    }
+
+    return { ok: true };
+  }
+);
+
 /**
  * canjearInvitacion — callable Cloud Function.
  *
- * Recibe { token, email, password }. Valida la invitación, crea la cuenta
- * con Admin SDK, y en una transacción otorga el rol y marca la invitación
- * como usada — crear cuenta y asignar rol pasan juntos, atómicamente, para
- * que nunca quede una cuenta huérfana sin rol. Devuelve un custom token para
- * que el cliente inicie sesión con esa cuenta.
+ * Recibe { token, codigo, password }. Revalida la invitación y el código
+ * (contra el hash guardado por enviarCodigoInvitacion, con
+ * crypto.timingSafeEqual), crea la cuenta con Admin SDK marcando
+ * emailVerified: true (ya se probó con el código), y en una transacción
+ * otorga el rol y marca la invitación como usada — todo atómico, para que
+ * nunca quede una cuenta huérfana sin rol. Devuelve un custom token para que
+ * el cliente inicie sesión con esa cuenta.
  *
  * createCustomToken() requiere el permiso IAM
  * 'iam.serviceAccounts.signBlob' otorgado a la cuenta de servicio de Cloud
- * Functions sobre sí misma (rol "Service Account Token Creator") — sin eso
- * revienta con un error no controlado en cada canje (así se descubrió el
- * bug original, ver commit anterior). Ya está otorgado en este proyecto.
+ * Functions sobre sí misma (rol "Service Account Token Creator") — ya está
+ * otorgado en este proyecto.
  */
 exports.canjearInvitacion = onCall({ region: 'us-central1', timeoutSeconds: 30, enforceAppCheck: true }, async (request) => {
-  const { token, email, password } = request.data;
+  const { token, codigo, password } = request.data;
 
   if (!token || typeof token !== 'string') {
     throw new HttpsError('invalid-argument', 'Invitación inválida.');
   }
-  if (!email || typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    throw new HttpsError('invalid-argument', 'Correo inválido.');
+  if (!codigo || typeof codigo !== 'string' || !/^\d{6}$/.test(codigo)) {
+    throw new HttpsError('invalid-argument', 'Código inválido.');
   }
   if (!password || typeof password !== 'string' || password.length < 8) {
     throw new HttpsError('invalid-argument', 'La contraseña debe tener al menos 8 caracteres.');
@@ -254,18 +414,7 @@ exports.canjearInvitacion = onCall({ region: 'us-central1', timeoutSeconds: 30, 
     throw new HttpsError('not-found', 'Esta invitación no existe.');
   }
   const inv = invitacionSnap.data();
-  if (inv.revocada) {
-    throw new HttpsError('failed-precondition', 'Esta invitación fue revocada.');
-  }
-  if (inv.usadaPor) {
-    throw new HttpsError('failed-precondition', 'Esta invitación ya fue usada.');
-  }
-  if (!inv.expiraEn || inv.expiraEn.toMillis() < Date.now()) {
-    throw new HttpsError('failed-precondition', 'Esta invitación venció.');
-  }
-  if (inv.rol !== 'admin' && inv.rol !== 'cocina') {
-    throw new HttpsError('failed-precondition', 'Rol de invitación inválido.');
-  }
+  validarInvitacionActiva(inv);
 
   const restauranteRef = db.doc(`restaurantes/${inv.restauranteId}`);
   const restauranteSnap = await restauranteRef.get();
@@ -273,12 +422,43 @@ exports.canjearInvitacion = onCall({ region: 'us-central1', timeoutSeconds: 30, 
     throw new HttpsError('failed-precondition', 'El restaurante de esta invitación ya no existe.');
   }
 
-  // ── Crear la cuenta ANTES de tocar la invitación: si falla aquí (correo ya
-  // registrado, contraseña rechazada), la invitación sigue intacta y el
-  // usuario puede reintentar con otro correo — no queda nada a medias.
+  // ── Validar el código ──────────────────────────────────────────────────────
+  const codigoRef = invitacionRef.collection('_privado').doc('codigo');
+  const codigoSnap = await codigoRef.get();
+  if (!codigoSnap.exists) {
+    throw new HttpsError('failed-precondition', 'No se ha enviado un código para esta invitación. Pide uno nuevo.');
+  }
+  const codigoData = codigoSnap.data();
+  if (codigoData.intentos >= CODIGO_MAX_INTENTOS) {
+    throw new HttpsError('failed-precondition', 'Demasiados intentos fallidos. Pide un código nuevo.');
+  }
+  if (!codigoData.expiraEn || codigoData.expiraEn.toMillis() < Date.now()) {
+    throw new HttpsError('failed-precondition', 'El código venció. Pide uno nuevo.');
+  }
+
+  const hashRecibido = hashCodigo(codigo, codigoData.salt);
+  const coincide = hashRecibido.length === codigoData.hash.length
+    && crypto.timingSafeEqual(Buffer.from(hashRecibido), Buffer.from(codigoData.hash));
+
+  if (!coincide) {
+    const nuevosIntentos = codigoData.intentos + 1;
+    await codigoRef.update({ intentos: nuevosIntentos });
+    const restantes = CODIGO_MAX_INTENTOS - nuevosIntentos;
+    if (restantes <= 0) {
+      throw new HttpsError('failed-precondition', 'Código incorrecto. Se agotaron los intentos — pide un código nuevo.');
+    }
+    throw new HttpsError('failed-precondition', `Código incorrecto. Te quedan ${restantes} intento(s).`);
+  }
+
+  const email = codigoData.email;
+
+  // ── Crear la cuenta ANTES de tocar la invitación: si falla aquí (contraseña
+  // rechazada, correo registrado justo ahora por otra vía), la invitación
+  // sigue intacta — no queda nada a medias. emailVerified: true porque el
+  // código ya lo probó.
   let uid;
   try {
-    const userRecord = await getAuth().createUser({ email, password });
+    const userRecord = await getAuth().createUser({ email, password, emailVerified: true });
     uid = userRecord.uid;
   } catch (e) {
     if (e.code === 'auth/email-already-exists') {
@@ -305,6 +485,9 @@ exports.canjearInvitacion = onCall({ region: 'us-central1', timeoutSeconds: 30, 
     if (e instanceof HttpsError) throw e;
     throw new HttpsError('internal', `No se pudo completar el registro: ${e.message || 'error desconocido'}`);
   }
+
+  // El código ya cumplió su función — que no quede reutilizable.
+  await codigoRef.delete().catch(() => {});
 
   // La cuenta y el rol YA quedaron asignados en este punto — un fallo aquí no
   // debe borrar nada, solo avisar que falta iniciar sesión manualmente.

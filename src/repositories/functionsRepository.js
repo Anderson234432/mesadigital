@@ -18,3 +18,12 @@ export function getCanjearInvitacionFn() {
   }
   return _canjearInvitacionFn;
 }
+
+let _enviarCodigoInvitacionFn = null;
+
+export function getEnviarCodigoInvitacionFn() {
+  if (!_enviarCodigoInvitacionFn) {
+    _enviarCodigoInvitacionFn = httpsCallable(getFunctions(getApps()[0]), 'enviarCodigoInvitacion');
+  }
+  return _enviarCodigoInvitacionFn;
+}

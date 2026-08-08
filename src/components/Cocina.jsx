@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom';
 import { verificarAccesoCocina } from '../services/restaurantesService';
 import { actualizarEstadoMesa, subscribePedidosHoy, reconectarFirestore } from '../services/pedidosService';
 import { subscribePlatos, toggleDisponible } from '../services/platosService';
-import { logout, getUid, emailVerificado, enviarVerificacionEmail } from '../services/authService';
+import { logout, getUid } from '../services/authService';
 
 function Cocina() {
   const { restauranteId } = useParams();
@@ -22,8 +22,6 @@ function Cocina() {
   const resubscribeRef = useRef(null);
   const retryTimerRef = useRef(null);
   const montadoRef = useRef(true);
-  const [reenviandoVerificacion, setReenviandoVerificacion] = useState(false);
-  const [verificacionReenviada, setVerificacionReenviada] = useState(false);
 
   useEffect(() => {
     montadoRef.current = true;
@@ -158,19 +156,6 @@ function Cocina() {
   // ─── Acciones ─────────────────────────────────────────────
   const cerrarSesion = () => logout().catch(console.error);
 
-  const handleReenviarVerificacion = async () => {
-    if (reenviandoVerificacion) return;
-    setReenviandoVerificacion(true);
-    try {
-      await enviarVerificacionEmail();
-      if (montadoRef.current) setVerificacionReenviada(true);
-    } catch (e) {
-      console.error('Error reenviando verificación:', e);
-    } finally {
-      if (montadoRef.current) setReenviandoVerificacion(false);
-    }
-  };
-
   const marcarListoMesa = (ids) =>
     actualizarEstadoMesa(restauranteId, ids, 'listo').catch(console.error);
 
@@ -264,21 +249,6 @@ function Cocina() {
           </button>
         </div>
       </div>
-
-      {/* Aviso de correo sin verificar — no bloquea el acceso, solo avisa */}
-      {!emailVerificado() && (
-        <div className="bg-amber-950 border-b border-amber-800 text-amber-300 text-xs px-4 py-3 flex flex-wrap items-center justify-between gap-2">
-          <span>Verifica tu correo para poder recuperar tu contraseña si la olvidas.</span>
-          {verificacionReenviada ? (
-            <span className="text-amber-400 font-bold">Correo reenviado ✓</span>
-          ) : (
-            <button onClick={handleReenviarVerificacion} disabled={reenviandoVerificacion}
-              className="border border-amber-700 px-3 py-1 hover:border-amber-400 hover:text-amber-100 transition-colors disabled:opacity-50 min-h-[44px]">
-              {reenviandoVerificacion ? 'Enviando...' : 'Reenviar correo'}
-            </button>
-          )}
-        </div>
-      )}
 
       {/* Pedidos */}
       <div className="max-w-2xl mx-auto px-4 py-6 space-y-4">
