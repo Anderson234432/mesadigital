@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { validarInvitacion, crearCuentaInvitado, otorgarRolInvitacion } from '../services/invitacionesService';
+import { validarInvitacion, canjearInvitacion } from '../services/invitacionesService';
 import { enviarVerificacionEmail } from '../services/authService';
 import { obtenerNombreRestaurante } from '../services/restaurantesService';
 
@@ -57,29 +57,17 @@ function Invitacion() {
     setEnviando(true);
     setError('');
 
-    // Paso 1: crear la cuenta. Si falla, la invitación sigue intacta (nunca
-    // se llegó a llamar la Cloud Function) — se puede reintentar.
+    // canjearInvitacion crea la cuenta y otorga el rol atómicamente
+    // (server-side, Admin SDK) — o falla entero sin dejar nada a medias.
     try {
-      await crearCuentaInvitado(email, password);
-    } catch (e) {
-      if (e?.code === 'auth/email-already-in-use') {
-        setError('Ya existe una cuenta con este correo. Inicia sesión y pídele al maestro que te asigne el acceso.');
-      } else {
-        setError(`No se pudo crear la cuenta: ${e?.message || 'error desconocido'}`);
-      }
-      setEnviando(false);
-      return;
-    }
-
-    // Paso 2: otorgar el rol. Si falla aquí, la cuenta YA existe (con sesión
-    // iniciada) pero sin rol — Admin/Cocina ya tienen una pantalla de "Sin
-    // acceso" con el UID visible para que el maestro lo agregue a mano.
-    try {
-      const { restauranteId, rol } = await otorgarRolInvitacion(token);
+      const { restauranteId, rol } = await canjearInvitacion({ token, email, password });
       enviarVerificacionEmail().catch((e) => console.error('No se pudo enviar el correo de verificación:', e));
       navigate(`/restaurante/${restauranteId}/${rol}`, { replace: true });
     } catch (e) {
-      setError(`Tu cuenta se creó, pero no se pudo asignar el acceso: ${e?.message || 'error desconocido'}. Pide al maestro que te agregue manualmente con tu correo.`);
+      // El mensaje real (ya en español, incluyendo el caso de correo
+      // existente) viene de la Cloud Function — no se oculta detrás de un
+      // texto genérico.
+      setError(e?.message || 'No se pudo completar el registro. Intenta de nuevo.');
       setEnviando(false);
     }
   }

@@ -13,6 +13,7 @@ function fechaLocalRD() {
   return new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
+
 /**
  * crearPedido — callable Cloud Function.
  *
@@ -222,35 +223,29 @@ exports.crearPedido = onCall({ region: 'us-central1', timeoutSeconds: 30, minIns
 /**
  * canjearInvitacion — callable Cloud Function.
  *
- * Recibe { token }. El cliente crea su propia cuenta con
- * createUserWithEmailAndPassword ANTES de llamar aquí (así llega con sesión
- * real, request.auth.uid poblado). Esta función solo valida la invitación y,
- * en una transacción, otorga el rol y marca la invitación como usada — eso
- * no puede pasar por Firestore Rules porque el usuario recién creado nunca
- * tiene permiso directo de escribir adminUids/cocinaUids.
+ * Recibe { token, email, password }. Valida la invitación, crea la cuenta
+ * con Admin SDK, y en una transacción otorga el rol y marca la invitación
+ * como usada — crear cuenta y asignar rol pasan juntos, atómicamente, para
+ * que nunca quede una cuenta huérfana sin rol. Devuelve un custom token para
+ * que el cliente inicie sesión con esa cuenta.
  *
- * Antes esta función también creaba la cuenta (Admin SDK) y devolvía un
- * custom token para iniciar sesión. Se quitó: createCustomToken requiere el
- * permiso IAM 'iam.serviceAccounts.signBlob' sobre la cuenta de servicio de
- * Cloud Functions, que este proyecto no tiene otorgado — reventaba con un
- * error no controlado en cada canje (ver firebase functions:log). Si se
- * quiere restaurar ese diseño, hay que otorgar el rol "Service Account Token
- * Creator" a la cuenta de servicio de Cloud Functions sobre sí misma.
- *
- * Si la transacción de otorgar el rol falla (invitación consumida por otra
- * petición concurrente, o ya no válida), la cuenta de Auth ya existe pero
- * sin rol — el cliente cae en la pantalla de "Sin acceso" de Admin/Cocina,
- * que ya expone el UID para que el maestro lo agregue a mano.
+ * createCustomToken() requiere el permiso IAM
+ * 'iam.serviceAccounts.signBlob' otorgado a la cuenta de servicio de Cloud
+ * Functions sobre sí misma (rol "Service Account Token Creator") — sin eso
+ * revienta con un error no controlado en cada canje (así se descubrió el
+ * bug original, ver commit anterior). Ya está otorgado en este proyecto.
  */
 exports.canjearInvitacion = onCall({ region: 'us-central1', timeoutSeconds: 30, enforceAppCheck: true }, async (request) => {
-  const { token } = request.data;
-  const uid = request.auth?.uid;
+  const { token, email, password } = request.data;
 
-  if (!uid) {
-    throw new HttpsError('unauthenticated', 'Debes iniciar sesión antes de canjear la invitación.');
-  }
   if (!token || typeof token !== 'string') {
     throw new HttpsError('invalid-argument', 'Invitación inválida.');
+  }
+  if (!email || typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw new HttpsError('invalid-argument', 'Correo inválido.');
+  }
+  if (!password || typeof password !== 'string' || password.length < 8) {
+    throw new HttpsError('invalid-argument', 'La contraseña debe tener al menos 8 caracteres.');
   }
 
   const invitacionRef = db.doc(`invitaciones/${token}`);
@@ -278,19 +273,49 @@ exports.canjearInvitacion = onCall({ region: 'us-central1', timeoutSeconds: 30, 
     throw new HttpsError('failed-precondition', 'El restaurante de esta invitación ya no existe.');
   }
 
+  // ── Crear la cuenta ANTES de tocar la invitación: si falla aquí (correo ya
+  // registrado, contraseña rechazada), la invitación sigue intacta y el
+  // usuario puede reintentar con otro correo — no queda nada a medias.
+  let uid;
+  try {
+    const userRecord = await getAuth().createUser({ email, password });
+    uid = userRecord.uid;
+  } catch (e) {
+    if (e.code === 'auth/email-already-exists') {
+      throw new HttpsError('already-exists', 'Ya existe una cuenta con este correo. Inicia sesión y pídele al maestro que te asigne el acceso.');
+    }
+    throw new HttpsError('invalid-argument', `No se pudo crear la cuenta: ${e.message || e.code || 'error desconocido'}`);
+  }
+
   const campoRol = inv.rol === 'admin' ? 'adminUids' : 'cocinaUids';
 
-  await db.runTransaction(async (tx) => {
-    const freshSnap = await tx.get(invitacionRef);
-    const fresh = freshSnap.data();
-    if (!freshSnap.exists || fresh.revocada || fresh.usadaPor || !fresh.expiraEn || fresh.expiraEn.toMillis() < Date.now()) {
-      throw new HttpsError('failed-precondition', 'Esta invitación ya no es válida.');
-    }
-    tx.update(restauranteRef, { [campoRol]: FieldValue.arrayUnion(uid) });
-    tx.update(invitacionRef, { usadaPor: uid, usadaEn: FieldValue.serverTimestamp() });
-  });
+  try {
+    await db.runTransaction(async (tx) => {
+      const freshSnap = await tx.get(invitacionRef);
+      const fresh = freshSnap.data();
+      if (!freshSnap.exists || fresh.revocada || fresh.usadaPor || !fresh.expiraEn || fresh.expiraEn.toMillis() < Date.now()) {
+        throw new HttpsError('failed-precondition', 'Esta invitación ya no es válida.');
+      }
+      tx.update(restauranteRef, { [campoRol]: FieldValue.arrayUnion(uid) });
+      tx.update(invitacionRef, { usadaPor: uid, usadaEn: FieldValue.serverTimestamp() });
+    });
+  } catch (e) {
+    // Compensación: nunca dejar una cuenta de Auth sin rol y sin explicación.
+    await getAuth().deleteUser(uid).catch(() => {});
+    if (e instanceof HttpsError) throw e;
+    throw new HttpsError('internal', `No se pudo completar el registro: ${e.message || 'error desconocido'}`);
+  }
 
-  return { restauranteId: inv.restauranteId, rol: inv.rol };
+  // La cuenta y el rol YA quedaron asignados en este punto — un fallo aquí no
+  // debe borrar nada, solo avisar que falta iniciar sesión manualmente.
+  let customToken;
+  try {
+    customToken = await getAuth().createCustomToken(uid);
+  } catch (e) {
+    throw new HttpsError('internal', `Tu cuenta y acceso se crearon correctamente, pero no se pudo iniciar sesión automáticamente (${e.message || 'error desconocido'}). Inicia sesión manualmente con tu correo y contraseña.`);
+  }
+
+  return { customToken, restauranteId: inv.restauranteId, rol: inv.rol };
 });
 
 // ── Limpieza semanal de usuarios anónimos (>30 días sin actividad) ─────────

@@ -1,7 +1,7 @@
 import { Timestamp } from 'firebase/firestore';
 import * as invitacionesRepo from '../repositories/invitacionesRepository';
 import { getCanjearInvitacionFn } from '../repositories/functionsRepository';
-import { registrarEmail } from './authService';
+import { loginConCustomToken } from './authService';
 
 const DIAS_EXPIRACION = 7;
 
@@ -41,13 +41,11 @@ export async function validarInvitacion(token) {
   return { valida: true, restauranteId: inv.restauranteId, rol: inv.rol };
 }
 
-// Dos pasos separados (no uno combinado) a propósito: el componente necesita
-// distinguir "no se pudo crear la cuenta" (la invitación sigue intacta, se
-// puede reintentar) de "la cuenta se creó pero no se pudo asignar el rol"
-// (son mensajes y siguientes pasos distintos para quien se está registrando).
-export const crearCuentaInvitado = (email, password) => registrarEmail(email, password);
-
-export async function otorgarRolInvitacion(token) {
-  const { data } = await getCanjearInvitacionFn()({ token });
+// canjearInvitacion (Admin SDK) crea la cuenta y otorga el rol atómicamente
+// server-side, y devuelve un custom token — así nunca queda una cuenta sin
+// rol a medio camino, sin importar en qué paso falle.
+export async function canjearInvitacion({ token, email, password }) {
+  const { data } = await getCanjearInvitacionFn()({ token, email, password });
+  await loginConCustomToken(data.customToken);
   return { restauranteId: data.restauranteId, rol: data.rol };
 }
