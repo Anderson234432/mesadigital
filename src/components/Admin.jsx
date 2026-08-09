@@ -1,9 +1,29 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useParams } from 'react-router-dom';
-import { verificarAccesoAdmin, guardarTiempos, guardarImpuestos } from '../services/restaurantesService';
+import { verificarAccesoAdmin, guardarTiempos, guardarImpuestos, guardarHoraCierreOperativo } from '../services/restaurantesService';
 import { subscribePlatos, guardarPlato, eliminarPlato, toggleDisponible } from '../services/platosService';
 import { subscribePedidosDia, subscribePedidosPeriodo, subscribeVentasDiarias, actualizarEstadoMesa } from '../services/pedidosService';
 import { logout, getUid } from '../services/authService';
+import { rangoDiaOperativo, fechaOperativaHoy, parsearHoraCierre } from '../utils/fechaOperativa';
+
+// Rango permitido para horaCierreOperativo — más allá de las 6 AM no tiene
+// sentido operativo (sería un error de captura), ver Admin > configuración.
+const HORA_CIERRE_MAX = 6 * 60;
+const HORA_CIERRE_REGEX = /^([0-1]\d|2[0-3]):([0-5]\d)$/;
+
+function horaCierreValida(valor) {
+  return HORA_CIERRE_REGEX.test(valor || '') && parsearHoraCierre(valor) <= HORA_CIERRE_MAX;
+}
+
+// "4:00 AM" a partir de minutos desde medianoche — formato fijo, no depende
+// del locale del navegador (para que el encabezado del PDF sea consistente).
+function formatHoraAmPm(minutos) {
+  const h24 = Math.floor(minutos / 60) % 24;
+  const min = minutos % 60;
+  const ampm = h24 < 12 ? 'AM' : 'PM';
+  const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
+  return `${h12}:${String(min).padStart(2, '0')} ${ampm}`;
+}
 
 function localDateStr(date = new Date()) {
   const y = date.getFullYear();
@@ -35,6 +55,9 @@ export default function Admin() {
   const [fileKey, setFileKey] = useState(0);
   const [tiemposForm, setTiemposForm] = useState({});
   const [impuestosForm, setImpuestosForm] = useState({});
+  const [horaCierreOperativo, setHoraCierreOperativo] = useState('00:00'); // valor guardado, usado para todos los cálculos
+  const [horaCierreForm, setHoraCierreForm] = useState('00:00'); // valor del campo de configuración (puede diferir del guardado hasta que se guarda)
+  const [horaCierreConfiguradaEn, setHoraCierreConfiguradaEn] = useState(null);
   const [guardando, setGuardando] = useState(false);
   const [mensaje, setMensaje] = useState({ texto: '', tipo: '' });
   const [confirmarEliminarId, setConfirmarEliminarId] = useState(null);
@@ -57,32 +80,56 @@ export default function Admin() {
     return new Date(y, m - 1, d, 12, 0, 0);
   }, [fechaFiltro]);
 
-  const esHoy = fechaFiltro === localDateStr();
+  // "Hoy" es la fecha OPERATIVA actual, no la de calendario — si son las 2 AM
+  // y el cierre es a las 4 AM, "hoy" todavía es el día operativo de ayer. No
+  // se memoiza (igual que las llamadas a localDateStr() de antes): se
+  // recalcula en cada render, así se mantiene razonablemente al día mientras
+  // el panel sigue abierto.
+  const hoyOperativoStr = fechaOperativaHoy(horaCierreOperativo);
+  const esHoy = fechaFiltro === hoyOperativoStr;
 
-  const rangoPeriodo = useMemo(() => {
-    if (vistaVentas === 'dia') {
-      const [y, mo, d] = fechaFiltro.split('-').map(Number);
-      return { inicio: new Date(y, mo - 1, d, 0, 0, 0), fin: new Date(y, mo - 1, d, 23, 59, 59) };
-    }
+  // Días de calendario que componen el período (Lunes-Domingo para semana,
+  // 1º-último del mes para mes) — esto es agrupación por calendario, no
+  // depende del día operativo. Lo que SÍ depende del día operativo es dónde
+  // empieza y termina, en el tiempo real, el primer y el último de esos días
+  // — eso lo resuelve rangoPeriodo más abajo con rangoDiaOperativo.
+  const rangoFechasOperativas = useMemo(() => {
+    if (vistaVentas === 'dia') return { primerDia: fechaFiltro, ultimoDia: fechaFiltro };
     if (vistaVentas === 'semana') {
       const ref = new Date(semanaBase + 'T12:00:00');
       const dow = ref.getDay();
       const diffMon = dow === 0 ? -6 : 1 - dow;
-      const lun = new Date(ref); lun.setDate(ref.getDate() + diffMon); lun.setHours(0, 0, 0, 0);
-      const dom = new Date(lun); dom.setDate(lun.getDate() + 6); dom.setHours(23, 59, 59, 999);
-      return { inicio: lun, fin: dom };
+      const lun = new Date(ref); lun.setDate(ref.getDate() + diffMon);
+      const dom = new Date(lun); dom.setDate(lun.getDate() + 6);
+      return { primerDia: localDateStr(lun), ultimoDia: localDateStr(dom) };
     }
-    const inicio = new Date(mesBase.y, mesBase.m, 1, 0, 0, 0);
-    const fin = new Date(mesBase.y, mesBase.m + 1, 0, 23, 59, 59);
-    return { inicio, fin };
+    const inicioMes = new Date(mesBase.y, mesBase.m, 1);
+    const finMes = new Date(mesBase.y, mesBase.m + 1, 0);
+    return { primerDia: localDateStr(inicioMes), ultimoDia: localDateStr(finMes) };
   }, [vistaVentas, fechaFiltro, semanaBase, mesBase]);
+
+  // Instantes reales [inicio, fin) del período, en la hora de cierre
+  // operativo del restaurante — usado para consultar pedidos por creadoEn.
+  const rangoPeriodo = useMemo(() => ({
+    inicio: rangoDiaOperativo(rangoFechasOperativas.primerDia, horaCierreOperativo).inicio,
+    fin: rangoDiaOperativo(rangoFechasOperativas.ultimoDia, horaCierreOperativo).fin,
+  }), [rangoFechasOperativas, horaCierreOperativo]);
 
   const labelPeriodo = useMemo(() => {
     const fmt = (d, opts) => d.toLocaleDateString('es-DO', opts);
+    // primerDia/ultimoDia son strings "YYYY-MM-DD" (días de calendario, sin
+    // ambigüedad de zona horaria) — se anclan a mediodía local solo para
+    // convertirlos a un objeto Date que Intl pueda formatear, igual que
+    // desglosePorDia más abajo. OJO: rangoPeriodo.fin (día operativo) es
+    // EXCLUSIVO — apunta al inicio del día siguiente — así que para mostrar
+    // el último día del período se usa ultimoDia, no rangoPeriodo.fin.
+    const diaTexto = (fechaStr, opts) => fmt(new Date(fechaStr + 'T12:00:00'), opts);
     if (vistaVentas === 'dia') return fmt(fechaSeleccionada, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-    if (vistaVentas === 'semana') return `${fmt(rangoPeriodo.inicio, { day: 'numeric', month: 'short' })} – ${fmt(rangoPeriodo.fin, { day: 'numeric', month: 'short', year: 'numeric' })}`;
-    return fmt(rangoPeriodo.inicio, { month: 'long', year: 'numeric' });
-  }, [vistaVentas, fechaSeleccionada, rangoPeriodo]);
+    if (vistaVentas === 'semana') {
+      return `${diaTexto(rangoFechasOperativas.primerDia, { day: 'numeric', month: 'short' })} – ${diaTexto(rangoFechasOperativas.ultimoDia, { day: 'numeric', month: 'short', year: 'numeric' })}`;
+    }
+    return diaTexto(rangoFechasOperativas.primerDia, { month: 'long', year: 'numeric' });
+  }, [vistaVentas, fechaSeleccionada, rangoFechasOperativas]);
 
   const pedidosReales = useMemo(
     () => pedidos.filter((p) => p.tipo !== 'llamada'),
@@ -185,7 +232,21 @@ export default function Admin() {
       pdf.text(nombreRestaurante, 105, 27, { align: 'center' });
     }
     pdf.setFontSize(11);
-    pdf.text(labelPeriodo, 105, nombreRestaurante ? 35 : 27, { align: 'center' });
+    // Día con cierre operativo configurado: el "día" del reporte no va de
+    // medianoche a medianoche, así que el encabezado lo dice explícitamente
+    // — si no, "el total del domingo" incluiría o excluiría pedidos de forma
+    // que no coincide con lo que el dueño espera ver. Con horaCierreOperativo
+    // por defecto (00:00) no hace falta: el día operativo YA es el de
+    // calendario, no se agrega nada.
+    let labelPeriodoConHorario = labelPeriodo;
+    if (vistaVentas === 'dia' && horaCierreOperativo !== '00:00') {
+      const horaTexto = formatHoraAmPm(parsearHoraCierre(horaCierreOperativo));
+      const diaSiguiente = new Date(fechaFiltro + 'T12:00:00');
+      diaSiguiente.setDate(diaSiguiente.getDate() + 1);
+      const nombreDiaSiguiente = diaSiguiente.toLocaleDateString('es-DO', { weekday: 'long' });
+      labelPeriodoConHorario = `${labelPeriodo} — de ${horaTexto} a ${horaTexto} del ${nombreDiaSiguiente}`;
+    }
+    pdf.text(labelPeriodoConHorario, 105, nombreRestaurante ? 35 : 27, { align: 'center' });
     pdf.line(15, nombreRestaurante ? 40 : 32, 195, nombreRestaurante ? 40 : 32);
 
     pdf.setFontSize(13);
@@ -257,13 +318,29 @@ export default function Admin() {
   // ─── Effect 1: acceso + platos ────────────────────────────
   useEffect(() => {
     verificarAccesoAdmin(restauranteId)
-      .then(({ acceso: ok, nombre, tiempos, impuestos }) => {
+      .then(({ acceso: ok, nombre, tiempos, impuestos, horaCierreOperativo: hc, horaCierreConfiguradaEn: hcFecha }) => {
         if (!montadoRef.current) return;
         setAcceso(ok);
         if (ok) {
           setNombreRestaurante(nombre);
           setTiemposForm(tiempos);
           setImpuestosForm(impuestos);
+          setHoraCierreOperativo(hc);
+          setHoraCierreForm(hc);
+          // Normalizado a Date de una vez — así el resto del componente nunca
+          // necesita saber si vino de Firestore (Timestamp) o de un guardado
+          // optimista recién hecho (Date directo).
+          setHoraCierreConfiguradaEn(hcFecha?.toDate ? hcFecha.toDate() : null);
+          // "Hoy" recién ahora se puede calcular bien — antes de esto no se
+          // conocía el cierre operativo real del restaurante. Reancla la
+          // vista a la fecha operativa correcta (sin esto, si el cierre no
+          // es 00:00, el panel podría abrir mostrando el día equivocado
+          // durante la carga inicial).
+          const hoy = fechaOperativaHoy(hc);
+          setFechaFiltro(hoy);
+          setSemanaBase(hoy);
+          const [y, m] = hoy.split('-').map(Number);
+          setMesBase({ y, m: m - 1 });
         }
       })
       .catch((e) => {
@@ -277,20 +354,23 @@ export default function Admin() {
   // ─── Effect 2: pedidos del período ───────────────────────
   useEffect(() => {
     if (acceso !== true) return;
-    if (vistaVentas === 'dia') return subscribePedidosDia(restauranteId, fechaFiltro, setPedidos);
+    if (vistaVentas === 'dia') return subscribePedidosDia(restauranteId, fechaFiltro, horaCierreOperativo, setPedidos);
     return subscribePedidosPeriodo(restauranteId, rangoPeriodo.inicio, rangoPeriodo.fin, setPedidos);
-  }, [restauranteId, fechaFiltro, acceso, vistaVentas, rangoPeriodo]);
+  }, [restauranteId, fechaFiltro, acceso, vistaVentas, rangoPeriodo, horaCierreOperativo]);
 
   // ─── Effect 2b: ventas diarias agregadas (solo semana/mes) ───────────────
   // En vista Día no se suscribe (los memos de arriba ignoran ventasDiarias
   // mientras vistaVentas === 'dia', así que dejar el estado anterior sin
   // limpiar aquí es inofensivo y evita un setState síncrono dentro del efecto).
+  // Los IDs de ventasDiarias son fechas operativas (rangoFechasOperativas),
+  // no se derivan de rangoPeriodo.inicio/fin — ese rango ya no es medianoche
+  // a medianoche, y su `fin` es además exclusivo (apunta al día siguiente).
   useEffect(() => {
     if (acceso !== true || vistaVentas === 'dia') return;
     return subscribeVentasDiarias(
-      restauranteId, localDateStr(rangoPeriodo.inicio), localDateStr(rangoPeriodo.fin), setVentasDiarias
+      restauranteId, rangoFechasOperativas.primerDia, rangoFechasOperativas.ultimoDia, setVentasDiarias
     );
-  }, [restauranteId, acceso, vistaVentas, rangoPeriodo]);
+  }, [restauranteId, acceso, vistaVentas, rangoFechasOperativas]);
 
   // ─── Acciones ─────────────────────────────────────────────
   const cerrarSesion = () => logout().catch(console.error);
@@ -359,6 +439,22 @@ export default function Admin() {
       if (montadoRef.current) mostrarMensaje('Impuestos guardados.', 'ok');
     } catch {
       if (montadoRef.current) mostrarMensaje('Error al guardar impuestos.', 'error');
+    }
+  };
+
+  const handleGuardarHoraCierre = async () => {
+    if (!horaCierreValida(horaCierreForm)) {
+      mostrarMensaje('La hora de cierre debe estar entre 00:00 y 06:00.', 'error');
+      return;
+    }
+    try {
+      await guardarHoraCierreOperativo(restauranteId, horaCierreForm);
+      if (!montadoRef.current) return;
+      setHoraCierreOperativo(horaCierreForm);
+      setHoraCierreConfiguradaEn(new Date()); // reflejo optimista de lo que la Cloud Function acaba de guardar
+      mostrarMensaje('Hora de cierre guardada.', 'ok');
+    } catch {
+      if (montadoRef.current) mostrarMensaje('Error al guardar la hora de cierre.', 'error');
     }
   };
 
@@ -570,6 +666,30 @@ export default function Admin() {
           </button>
         </div>
 
+        {/* ── Día operativo ── */}
+        <div className="border border-neutral-800 p-6 mt-8">
+          <h2 className="text-amber-400 text-xs tracking-widest uppercase mb-1">Hora de cierre del día operativo</h2>
+          <p className="text-neutral-500 text-xs mb-4">
+            Si tu restaurante sirve hasta la madrugada, pon aquí la hora en que cierras. Todo lo que se venda antes
+            de esa hora contará como el día anterior. Ejemplo: si cierras a las 3:00 AM, una venta del lunes a la
+            1:00 AM aparecerá en el reporte del domingo.
+          </p>
+          <div className="flex items-center gap-3">
+            <label className="text-neutral-400 text-sm w-32">Hora de cierre</label>
+            <input type="time" step="60" min="00:00" max="06:00" value={horaCierreForm}
+              onChange={(e) => setHoraCierreForm(e.target.value)}
+              className="w-32 bg-neutral-900 border border-neutral-700 px-3 py-2 text-white focus:outline-none focus:border-amber-400 text-base" />
+          </div>
+          <p className="text-neutral-600 text-xs mt-3">
+            Con esta configuración, tu día del lunes va desde el lunes {formatHoraAmPm(parsearHoraCierre(horaCierreForm))} hasta
+            el martes {formatHoraAmPm(parsearHoraCierre(horaCierreForm))}.
+          </p>
+          <button onClick={handleGuardarHoraCierre}
+            className="mt-4 bg-amber-400 text-black px-6 py-2 font-bold hover:bg-amber-300 transition-colors min-h-[44px]">
+            Guardar hora de cierre
+          </button>
+        </div>
+
         {/* ── Impuestos ── */}
         <div className="border border-neutral-800 p-6 mt-8">
           <h2 className="text-amber-400 text-xs tracking-widest uppercase mb-1">Impuestos</h2>
@@ -677,6 +797,18 @@ export default function Admin() {
         <div className="border border-neutral-800 p-6 mt-8">
           <h2 className="text-amber-400 text-xs tracking-widest uppercase mb-4">Ventas</h2>
 
+          {/* Aviso de discontinuidad: los reportes de antes de configurar el
+              cierre operativo se calcularon con día de calendario (medianoche
+              a medianoche), no con esta hora de cierre. No se recalculan
+              solos — ver nota de la Tarea 5 del brief en el historial de este
+              cambio para el porqué. */}
+          {horaCierreOperativo !== '00:00' && horaCierreConfiguradaEn && (
+            <p className="text-neutral-500 text-xs border border-neutral-800 bg-neutral-900 px-3 py-2 mb-4">
+              Los reportes de fechas anteriores al {horaCierreConfiguradaEn.toLocaleDateString('es-DO', { day: 'numeric', month: 'long', year: 'numeric' })} usan
+              el día de calendario (medianoche a medianoche), no tu hora de cierre configurada.
+            </p>
+          )}
+
           {/* Tabs */}
           <div className="flex border border-neutral-700 mb-4 w-fit">
             {['dia', 'semana', 'mes'].map((v) => (
@@ -697,12 +829,12 @@ export default function Admin() {
                   const d = new Date(fechaFiltro + 'T12:00:00'); d.setDate(d.getDate() - 1);
                   setFechaFiltro(localDateStr(d));
                 }} className="text-neutral-400 hover:text-white px-2 py-1 border border-neutral-700 hover:border-neutral-500">◀</button>
-                <input type="date" value={fechaFiltro} max={localDateStr()}
+                <input type="date" value={fechaFiltro} max={hoyOperativoStr}
                   onChange={(e) => { if (e.target.value) setFechaFiltro(e.target.value); }}
                   className="flex-1 min-w-0 bg-neutral-900 border border-neutral-700 px-3 py-2 text-white focus:outline-none focus:border-amber-400 text-base" />
                 <button onClick={() => {
                   const d = new Date(fechaFiltro + 'T12:00:00'); d.setDate(d.getDate() + 1);
-                  if (localDateStr(d) <= localDateStr()) setFechaFiltro(localDateStr(d));
+                  if (localDateStr(d) <= hoyOperativoStr) setFechaFiltro(localDateStr(d));
                 }} className="text-neutral-400 hover:text-white px-2 py-1 border border-neutral-700 hover:border-neutral-500">▶</button>
               </>
             )}
@@ -715,7 +847,7 @@ export default function Admin() {
                 <span className="text-white text-sm">{labelPeriodo}</span>
                 <button onClick={() => {
                   const d = new Date(semanaBase + 'T12:00:00'); d.setDate(d.getDate() + 7);
-                  if (d <= new Date()) setSemanaBase(localDateStr(d));
+                  if (localDateStr(d) <= hoyOperativoStr) setSemanaBase(localDateStr(d));
                 }} className="text-neutral-400 hover:text-white px-2 py-1 border border-neutral-700 hover:border-neutral-500">▶</button>
               </>
             )}
@@ -731,8 +863,8 @@ export default function Admin() {
                 <span className="text-white text-sm capitalize">{labelPeriodo}</span>
                 <button onClick={() => {
                   setMesBase((prev) => {
-                    const ahora = new Date();
-                    if (prev.y === ahora.getFullYear() && prev.m === ahora.getMonth()) return prev;
+                    const [hy, hm] = hoyOperativoStr.split('-').map(Number);
+                    if (prev.y === hy && prev.m === hm - 1) return prev;
                     const m = prev.m === 11 ? 0 : prev.m + 1;
                     const y = prev.m === 11 ? prev.y + 1 : prev.y;
                     return { y, m };

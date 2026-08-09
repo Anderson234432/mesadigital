@@ -42,11 +42,21 @@
 // marcador con completado:false significa que una corrida anterior murió a
 // medias; revisa manualmente (compara ventasDiarias contra pedidos) antes de
 // borrar ese documento para reintentar.
+//
+// DÍA OPERATIVO: agrupa cada pedido por fechaOperativa (ver
+// functions/lib/fechaOperativa.js), no por fecha de calendario — usa el
+// horaCierreOperativo guardado en restaurantes/{id} (o "00:00", idéntico al
+// día de calendario, si el restaurante nunca lo configuró). Si un restaurante
+// configura horaCierreOperativo DESPUÉS de que este script ya corrió para él,
+// su ventasDiarias histórico queda calculado con el cierre viejo — para
+// recalcular, borra restaurantes/{id}/ventasDiarias/* y el marcador
+// restaurantes/{id}/_meta/backfillVentasDiarias, y vuelve a correr esto.
 
 const { initializeApp, applicationDefault } = require('firebase-admin/app');
 const { getFirestore, FieldValue, Timestamp } = require('firebase-admin/firestore');
 const path = require('node:path');
 const fs = require('node:fs');
+const { fechaOperativa } = require('../lib/fechaOperativa');
 
 // Con credenciales de usuario (Application Default Credentials vía
 // firebase-tools) el projectId no viene embebido, a diferencia de una service
@@ -71,12 +81,6 @@ const cutoffTimestamp = Timestamp.fromDate(cutoffDate);
 initializeApp({ credential: applicationDefault(), projectId });
 const db = getFirestore();
 
-// Misma fórmula que fechaLocalRD() en functions/index.js — RD es UTC-4 fijo,
-// sin horario de verano.
-function fechaLocalRD(fecha) {
-  return new Date(fecha.getTime() - 4 * 60 * 60 * 1000).toISOString().slice(0, 10);
-}
-
 async function backfillRestaurante(restauranteId) {
   // ── Reservar el marcador ANTES de leer/escribir nada — si ya existe (de
   // esta corrida o de una anterior), este restaurante se omite entero. Esto
@@ -92,7 +96,16 @@ async function backfillRestaurante(restauranteId) {
     }
     return;
   }
-  await marcadorRef.set({ completado: false, cutoff: cutoffTimestamp, iniciadoEn: FieldValue.serverTimestamp() });
+
+  // Día operativo: si el restaurante no tiene horaCierreOperativo configurado
+  // (caso normal), cae a "00:00" — fecha de calendario pura, idéntico al
+  // comportamiento de antes de esta función.
+  const restauranteSnap = await db.doc(`restaurantes/${restauranteId}`).get();
+  const horaCierreOperativo = restauranteSnap.data()?.horaCierreOperativo || '00:00';
+
+  await marcadorRef.set({
+    completado: false, cutoff: cutoffTimestamp, horaCierreOperativo, iniciadoEn: FieldValue.serverTimestamp(),
+  });
 
   const pedidosSnap = await db.collection(`restaurantes/${restauranteId}/pedidos`)
     .where('creadoEn', '<', cutoffTimestamp)
@@ -108,7 +121,7 @@ async function backfillRestaurante(restauranteId) {
     if (p.tipo === 'llamada') return; // las llamadas al mesero no son venta
     if (!p.creadoEn) return;
 
-    const fecha = fechaLocalRD(p.creadoEn.toDate());
+    const fecha = fechaOperativa(p.creadoEn.toMillis(), horaCierreOperativo);
     if (!porDia[fecha]) {
       porDia[fecha] = { total: 0, subtotal: 0, itbis: 0, propina: 0, cantidadPedidos: 0, platos: {} };
     }
@@ -151,6 +164,7 @@ async function backfillRestaurante(restauranteId) {
   await marcadorRef.set({
     completado: true,
     cutoff: cutoffTimestamp,
+    horaCierreOperativo,
     terminadoEn: FieldValue.serverTimestamp(),
     pedidosProcesados: pedidosSnap.size,
     diasEscritos: fechas.length,

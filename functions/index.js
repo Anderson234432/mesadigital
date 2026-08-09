@@ -6,17 +6,12 @@ const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const { getAuth } = require('firebase-admin/auth');
 const crypto = require('node:crypto');
 const { Resend } = require('resend');
+const { fechaOperativa } = require('./lib/fechaOperativa');
 
 initializeApp();
 const db = getFirestore();
 
 const resendApiKey = defineSecret('RESEND_API_KEY');
-
-// República Dominicana: UTC-4 fijo todo el año, sin horario de verano — así
-// un pedido de las 11pm no cae en el día equivocado en ventasDiarias.
-function fechaLocalRD() {
-  return new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString().slice(0, 10);
-}
 
 // ── Validación compartida por enviarCodigoInvitacion y canjearInvitacion ──────
 function validarInvitacionActiva(inv) {
@@ -108,6 +103,7 @@ exports.crearPedido = onCall({ region: 'us-central1', timeoutSeconds: 30, minIns
     throw new HttpsError('permission-denied', 'Token de mesa inválido.');
   }
   const impuestosConfig = restauranteSnap.data()?.impuestos || {};
+  const horaCierreOperativo = restauranteSnap.data()?.horaCierreOperativo || '00:00';
 
   // ── Fetch verified prices from server (fuera de la transacción: no necesita
   // atomicidad con lo demás, y evita cargar la transacción con hasta 30 reads) ──
@@ -250,6 +246,11 @@ exports.crearPedido = onCall({ region: 'us-central1', timeoutSeconds: 30, minIns
     // se truncaran a 500 documentos y mintieran el total). Se agrupa por
     // platoId antes de escribir para no pisar el mismo campo dos veces dentro
     // de la misma transacción si el pedido repite un plato.
+    //
+    // La fecha del documento es la fecha OPERATIVA (fechaOperativa), no la de
+    // calendario — un pedido antes de horaCierreOperativo cuenta como venta
+    // del día anterior. Con horaCierreOperativo por defecto ("00:00") esto es
+    // exactamente el día de calendario en hora de RD, igual que antes.
     const conteoPlatos = {};
     itemsValidados.forEach((item) => {
       if (!conteoPlatos[item.platoId]) conteoPlatos[item.platoId] = { nombre: item.nombre, cantidad: 0 };
@@ -259,7 +260,7 @@ exports.crearPedido = onCall({ region: 'us-central1', timeoutSeconds: 30, minIns
     Object.entries(conteoPlatos).forEach(([platoId, { nombre, cantidad }]) => {
       platosField[platoId] = { nombre, cantidad: FieldValue.increment(cantidad) };
     });
-    tx.set(db.doc(`restaurantes/${restauranteId}/ventasDiarias/${fechaLocalRD()}`), {
+    tx.set(db.doc(`restaurantes/${restauranteId}/ventasDiarias/${fechaOperativa(Date.now(), horaCierreOperativo)}`), {
       total: FieldValue.increment(total),
       subtotal: FieldValue.increment(subtotal),
       itbis: FieldValue.increment(itbis),

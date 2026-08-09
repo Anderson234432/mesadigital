@@ -1,6 +1,6 @@
 import {
   collection, doc, getDoc, addDoc, updateDoc, deleteDoc, setDoc,
-  onSnapshot, arrayUnion, arrayRemove,
+  onSnapshot, arrayUnion, arrayRemove, serverTimestamp,
 } from 'firebase/firestore';
 import { db } from '../firebase';
 
@@ -21,6 +21,15 @@ export const actualizarRestaurante = (restauranteId, datos) =>
 
 export const eliminarRestaurante = (restauranteId) =>
   deleteDoc(doc(db, 'restaurantes', restauranteId));
+
+// horaCierreConfiguradaEn queda para poder avisar en el panel que los
+// reportes anteriores a esa fecha se calcularon con día de calendario, no
+// con el cierre operativo — ver Admin.jsx.
+export const guardarHoraCierreOperativo = (restauranteId, horaCierreOperativo) =>
+  updateDoc(doc(db, 'restaurantes', restauranteId), {
+    horaCierreOperativo,
+    horaCierreConfiguradaEn: serverTimestamp(),
+  });
 
 export const agregarUidRol = (restauranteId, campo, uid) =>
   updateDoc(doc(db, 'restaurantes', restauranteId), { [campo]: arrayUnion(uid) });

@@ -22,20 +22,22 @@ export async function verificarAccesoAdmin(restauranteId) {
     nombre: data.nombre || '',
     tiempos: data.tiempos || {},
     impuestos: { ...IMPUESTOS_DEFAULT, ...(data.impuestos || {}) },
+    horaCierreOperativo: data.horaCierreOperativo || '00:00',
+    horaCierreConfiguradaEn: data.horaCierreConfiguradaEn || null,
   };
 }
 
 export async function verificarAccesoCocina(restauranteId) {
   const uid = getUid();
-  if (!uid) return false;
+  if (!uid) return { acceso: false, horaCierreOperativo: '00:00' };
   const snap = await repo.obtenerRestaurante(restauranteId);
-  if (!snap.exists()) return false;
+  if (!snap.exists()) return { acceso: false, horaCierreOperativo: '00:00' };
   const data = snap.data();
-  return (
+  const acceso =
     uid === MAESTRO_UID ||
     (data.adminUids || []).includes(uid) ||
-    (data.cocinaUids || []).includes(uid)
-  );
+    (data.cocinaUids || []).includes(uid);
+  return { acceso, horaCierreOperativo: data.horaCierreOperativo || '00:00' };
 }
 
 // Lectura puntual y pública (sin sesión) — usada por /invitacion/:token para
@@ -74,6 +76,9 @@ export const guardarTiempos = (restauranteId, tiempos) =>
 
 export const guardarImpuestos = (restauranteId, impuestos) =>
   repo.actualizarRestaurante(restauranteId, { impuestos });
+
+export const guardarHoraCierreOperativo = (restauranteId, horaCierreOperativo) =>
+  repo.guardarHoraCierreOperativo(restauranteId, horaCierreOperativo);
 
 export const guardarNumMesas = (restauranteId, numMesas) =>
   repo.actualizarRestaurante(restauranteId, { numMesas });

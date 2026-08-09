@@ -10,6 +10,7 @@ function Cocina() {
 
   // ─── Estado ───────────────────────────────────────────────
   const [acceso, setAcceso] = useState(null); // null=cargando, true=ok, false=denegado
+  const [horaCierreOperativo, setHoraCierreOperativo] = useState('00:00');
   const [pedidos, setPedidos] = useState([]);
   const [platos, setPlatos] = useState([]);
   const [disponibilidadAbierta, setDisponibilidadAbierta] = useState(false);
@@ -37,7 +38,10 @@ function Cocina() {
   // ─── Verificar acceso ────────────────────────────────────
   useEffect(() => {
     verificarAccesoCocina(restauranteId)
-      .then(setAcceso)
+      .then(({ acceso: ok, horaCierreOperativo: hc }) => {
+        setAcceso(ok);
+        setHoraCierreOperativo(hc);
+      })
       .catch((e) => { console.error('Error verificando acceso cocina:', e); setAcceso(false); });
   }, [restauranteId]);
 
@@ -100,6 +104,7 @@ function Cocina() {
       if (unsubPedidosRef.current) unsubPedidosRef.current();
       unsubPedidosRef.current = subscribePedidosHoy(
         restauranteId,
+        horaCierreOperativo,
         (todos) => { if (montadoRef.current) setPedidos(todos.filter((p) => p.estado !== 'archivado')); },
         (err) => { console.error('Error pedidos cocina:', err); if (montadoRef.current) retryTimerRef.current = setTimeout(subscribe, 3000); }
       );
@@ -112,7 +117,7 @@ function Cocina() {
       clearTimeout(retryTimerRef.current);
       if (unsubPedidosRef.current) unsubPedidosRef.current();
     };
-  }, [restauranteId, acceso]);
+  }, [restauranteId, acceso, horaCierreOperativo]);
 
   // ─── Re-suscribir al volver a la pestaña o recuperar señal (crítico en móvil) ──
   useEffect(() => {

@@ -1,5 +1,6 @@
 import * as pedidosRepo from '../repositories/pedidosRepository';
 import { getCrearPedidoFn } from '../repositories/functionsRepository';
+import { rangoDiaOperativo, fechaOperativaHoy } from '../utils/fechaOperativa';
 
 // ─── Retry logic ──────────────────────────────────────────
 const RETRYABLE = ['unavailable', 'deadline-exceeded', 'resource-exhausted'];
@@ -101,31 +102,39 @@ export const actualizarEstadoMesa = (restauranteId, ids, estado) =>
   pedidosRepo.actualizarEstadoPedidos(restauranteId, ids, estado);
 
 // ─── Subscripciones ───────────────────────────────────────
-export function subscribePedidosDia(restauranteId, fechaFiltro, cb) {
-  const [y, m, d] = fechaFiltro.split('-').map(Number);
-  const inicioDia = new Date(y, m - 1, d, 0, 0, 0, 0);
-  const finDia = new Date(y, m - 1, d, 23, 59, 59, 999);
+// El rango [inicio, fin) de rangoDiaOperativo es exclusivo en `fin` —
+// subscribePedidosFecha (Firestore) usa un límite superior inclusivo (<=),
+// así que se resta 1ms para no incluir el primer instante del día siguiente.
+export function subscribePedidosDia(restauranteId, fechaFiltro, horaCierreOperativo, cb) {
+  const { inicio, fin } = rangoDiaOperativo(fechaFiltro, horaCierreOperativo);
   return pedidosRepo.subscribePedidosFecha(
-    restauranteId, inicioDia, finDia,
+    restauranteId, inicio, new Date(fin.getTime() - 1),
     cb,
     (err) => console.error('subscribePedidosDia:', err)
   );
 }
 
+// `inicio`/`fin` ya vienen como instantes exactos (día operativo) — ver
+// Admin.jsx (rangoPeriodo). Mismo ajuste de -1ms que subscribePedidosDia.
 export function subscribePedidosPeriodo(restauranteId, inicio, fin, cb) {
   return pedidosRepo.subscribePedidosFecha(
-    restauranteId, inicio, fin,
+    restauranteId, inicio, new Date(fin.getTime() - 1),
     cb,
     (err) => console.error('subscribePedidosPeriodo:', err),
     500
   );
 }
 
-export function subscribePedidosHoy(restauranteId, cb, onError) {
-  const inicioDia = new Date();
-  inicioDia.setHours(0, 0, 0, 0);
+// Pedidos del día operativo ACTUAL, sin límite superior (cocina necesita ver
+// pedidos según se van creando). Ancla el límite inferior al inicio del día
+// operativo (no a la medianoche local) — así, si esta suscripción se rearma
+// después de medianoche pero antes del cierre operativo (p.ej. al volver a
+// primer plano en el celular), no pierde los pedidos de la mesa que sigue
+// activa desde antes de medianoche.
+export function subscribePedidosHoy(restauranteId, horaCierreOperativo, cb, onError) {
+  const { inicio } = rangoDiaOperativo(fechaOperativaHoy(horaCierreOperativo), horaCierreOperativo);
   return pedidosRepo.subscribePedidosDesde(
-    restauranteId, inicioDia,
+    restauranteId, inicio,
     cb,
     onError || ((err) => console.error('subscribePedidosHoy:', err))
   );
