@@ -588,3 +588,67 @@ exports.limpiarPedidosAntiguos = onSchedule(
     console.log(`Limpieza completada. Total pedidos eliminados: ${totalBorrados}`);
   }
 );
+
+// ── Limpieza semanal de invitaciones antiguas (usadas o vencidas hace más de
+// 30 días) ───────────────────────────────────────────────────────────────
+// Una invitación usada o vencida no se puede volver a canjear
+// (canjearInvitacion la rechaza), así que dejarla en Firestore para siempre
+// es solo acumulación. Se borra junto con su subcolección _privado (el hash
+// del código y el rate limit) — Firestore no borra subcolecciones en
+// cascada, así que borrar solo el documento padre los dejaría huérfanos.
+//
+// Dos condiciones, no una: expiraEn es siempre creadoEn + 7 días, fijo desde
+// la creación, sin importar cuándo (o si) se usó la invitación. Una
+// invitación usada al día siguiente de creada puede tener usadaEn con más de
+// 30 días de antigüedad mientras expiraEn (solo 7 días después de crearse)
+// todavía no cumple el umbral por sí solo — por eso se consultan usadaEn y
+// expiraEn por separado y se combinan.
+exports.limpiarInvitacionesAntiguas = onSchedule(
+  { schedule: 'every 168 hours', region: 'us-central1', timeoutSeconds: 540 },
+  async () => {
+    const { Timestamp } = require('firebase-admin/firestore');
+    const cutoff = Timestamp.fromDate(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
+    // Margen bajo el límite de 500 escrituras por batch de Firestore — cada
+    // invitación puede sumar hasta 3 escrituras (el documento + _privado/codigo
+    // + _privado/rateLimit).
+    const MAX_WRITES_POR_LOTE = 450;
+
+    const [usadasSnap, vencidasSnap] = await Promise.all([
+      db.collection('invitaciones').where('usadaEn', '<', cutoff).get(),
+      db.collection('invitaciones').where('expiraEn', '<', cutoff).get(),
+    ]);
+
+    const porBorrar = new Map();
+    usadasSnap.docs.forEach((d) => porBorrar.set(d.id, d.ref));
+    vencidasSnap.docs.forEach((d) => porBorrar.set(d.id, d.ref));
+
+    let batch = db.batch();
+    let writesEnLote = 0;
+    let totalBorrados = 0;
+    let totalErrores = 0;
+
+    for (const ref of porBorrar.values()) {
+      try {
+        const privadoSnap = await ref.collection('_privado').get();
+        if (writesEnLote + privadoSnap.size + 1 > MAX_WRITES_POR_LOTE) {
+          await batch.commit();
+          batch = db.batch();
+          writesEnLote = 0;
+        }
+        privadoSnap.docs.forEach((p) => { batch.delete(p.ref); writesEnLote++; });
+        batch.delete(ref);
+        writesEnLote++;
+        totalBorrados++;
+      } catch (e) {
+        // Un fallo con una invitación puntual no debe impedir procesar las
+        // demás; la siguiente corrida (semanal) retoma lo pendiente.
+        console.error(`Error preparando borrado de invitación ${ref.id}:`, e.message);
+        totalErrores++;
+      }
+    }
+
+    if (writesEnLote > 0) await batch.commit();
+
+    console.log(`Invitaciones antiguas eliminadas: ${totalBorrados}${totalErrores ? ` (errores: ${totalErrores})` : ''}`);
+  }
+);
