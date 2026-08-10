@@ -107,6 +107,7 @@ function NotFound() {
 function App() {
   const [usuario, setUsuario] = useState(null);
   const [cargando, setCargando] = useState(true);
+  const [tardandoMucho, setTardandoMucho] = useState(false);
 
   useEffect(() => {
     return suscribirEstadoAuth((user) => {
@@ -115,7 +116,34 @@ function App() {
     });
   }, []);
 
-  if (cargando) return <div className="min-h-screen bg-neutral-950" />;
+  // Si Firebase Auth nunca responde (servicio caído, red bloqueada por un
+  // firewall/proxy corporativo, etc.), suscribirEstadoAuth no dispara nunca
+  // y `cargando` se queda en true para siempre — sin esto, el cliente ve una
+  // pantalla en blanco indefinida sin ninguna pista de qué pasó.
+  useEffect(() => {
+    if (!cargando) return;
+    const id = setTimeout(() => setTardandoMucho(true), 8000);
+    return () => clearTimeout(id);
+  }, [cargando]);
+
+  if (cargando) {
+    if (tardandoMucho) {
+      return (
+        <div className="min-h-screen bg-neutral-950 text-white font-serif flex items-center justify-center">
+          <div className="text-center px-6">
+            <p className="text-red-400 text-xs tracking-widest uppercase mb-2">Sin conexión con el servidor</p>
+            <h1 className="text-2xl font-bold mb-4">Esto está tardando más de lo normal</h1>
+            <p className="text-neutral-500 text-sm mb-6">Verifica tu conexión e intenta de nuevo.</p>
+            <button onClick={() => window.location.reload()}
+              className="text-xs border border-neutral-600 text-neutral-400 px-4 py-2 hover:border-amber-400 hover:text-amber-400 transition-colors">
+              Reintentar
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return <div className="min-h-screen bg-neutral-950" />;
+  }
 
   return (
     <BrowserRouter>

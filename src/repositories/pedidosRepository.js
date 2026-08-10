@@ -132,11 +132,22 @@ export function actualizarEstadoPedidos(restauranteId, ids, estado) {
   // móvil) puede disparar esta función dos veces para la misma mesa antes de
   // que el listener refleje el cambio; con un batch simple eso decrementa dos
   // veces y deja el contador negativo permanentemente. La transacción solo
-  // decrementa si algún pedido de esta tanda todavía no estaba archivado.
+  // decrementa si algún PEDIDO REAL de esta tanda todavía no estaba
+  // archivado. Se excluyen los de tipo 'llamada' a propósito: crearLlamadaMesero
+  // nunca incrementa este contador (llamar al mesero no es un pedido), así que
+  // descartar una llamada (Cocina.jsx: descartarLlamada) no debe decrementarlo
+  // — antes de este fix, archivar SOLO el documento de la llamada (que sigue
+  // 'pendiente' hasta ese momento) igual disparaba el decremento, restando 1 de
+  // stats.mesasPendientes cada vez que se atendía una llamada al mesero, sin
+  // que nada lo hubiera incrementado — el contador quedaba cada vez más
+  // negativo (enmascarado en pantalla por el Math.max(0, ...) de Menu.jsx, pero
+  // el valor real en Firestore seguía cayendo).
   const refs = ids.map((id) => doc(db, 'restaurantes', restauranteId, 'pedidos', id));
   return runTransaction(db, async (tx) => {
     const snaps = await Promise.all(refs.map((ref) => tx.get(ref)));
-    const habiaActivos = snaps.some((s) => s.exists() && s.data().estado !== 'archivado');
+    const habiaActivos = snaps.some((s) =>
+      s.exists() && s.data().estado !== 'archivado' && s.data().tipo !== 'llamada'
+    );
     refs.forEach((ref) => tx.update(ref, { estado }));
     if (habiaActivos) {
       tx.update(doc(db, 'restaurantes', restauranteId), {

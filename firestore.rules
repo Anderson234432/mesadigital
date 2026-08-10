@@ -66,8 +66,19 @@ service cloud.firestore {
     // ── Restaurantes ───────────────────────────────────────────────────────────
 
     match /restaurantes/{restauranteId} {
-      // Lectura pública: clientes necesitan nombre, tiempos y stats
-      allow read: if true;
+      // Lectura pública POR ID: clientes necesitan nombre, tiempos y stats de
+      // SU restaurante. `get` y `list` son operaciones separadas en Firestore
+      // Rules (mismo patrón que invitaciones/{token} más abajo) — `get`
+      // pública permite leer un restaurante conocido por ID (Menu.jsx,
+      // Admin.jsx, Cocina.jsx, Invitacion.jsx solo hacen esto), pero `list`
+      // (enumerar la colección completa) se restringe al maestro. Sin este
+      // split, cualquiera sin sesión puede listar TODOS los restaurantes —
+      // nombre, adminUids y cocinaUids incluidos — con una sola query sin
+      // autenticar, algo que ningún flujo de la app necesita (solo
+      // PanelMaestro.jsx enumera la colección completa, y ya requiere ser
+      // maestro).
+      allow get: if true;
+      allow list: if esMaestro();
 
       // Solo el maestro puede crear o eliminar restaurantes
       allow create, delete: if esMaestro();

@@ -136,6 +136,20 @@ export default function Admin() {
     [pedidos]
   );
 
+  // El camino de respaldo (cuando crearPedido no está disponible y el
+  // navegador escribe el pedido directo a Firestore, ver
+  // pedidosRepository.js) nunca agrega a ventasDiarias — solo la Cloud
+  // Function lo hace. Vista Día lee de `pedidos` directo (siempre exacta,
+  // sin importar el camino), pero Semana/Mes leen de ventasDiarias, así que
+  // un pedido de respaldo en el período queda fuera de esos totales sin
+  // ningún aviso. mesaToken solo lo escribe el camino de respaldo (ver
+  // pedidosRepository.js) — es la única marca disponible para detectarlo sin
+  // tocar la Cloud Function ni el modelo de datos.
+  const hayPedidosDeRespaldo = useMemo(
+    () => vistaVentas !== 'dia' && pedidosReales.some((p) => p.mesaToken),
+    [vistaVentas, pedidosReales]
+  );
+
   // Día: los totales salen de los pedidos del propio día (nunca ha habido
   // riesgo de truncar, un restaurante no llega a cientos de pedidos en un día).
   // Semana/Mes: salen de ventasDiarias (agregado server-side por la Cloud
@@ -806,6 +820,17 @@ export default function Admin() {
             <p className="text-neutral-500 text-xs border border-neutral-800 bg-neutral-900 px-3 py-2 mb-4">
               Los reportes de fechas anteriores al {horaCierreConfiguradaEn.toLocaleDateString('es-DO', { day: 'numeric', month: 'long', year: 'numeric' })} usan
               el día de calendario (medianoche a medianoche), no tu hora de cierre configurada.
+            </p>
+          )}
+
+          {/* Al menos un pedido del período se creó por el camino de respaldo
+              (mesaToken presente) — esos pedidos no están sumados en el total
+              de Semana/Mes (ver nota junto a hayPedidosDeRespaldo). */}
+          {hayPedidosDeRespaldo && (
+            <p className="text-amber-400 text-xs border border-amber-800 bg-amber-950 px-3 py-2 mb-4">
+              Uno o más pedidos de este período se registraron en modo de respaldo (cuando el sistema
+              principal no estaba disponible) y no están incluidos en este total — revisa el detalle de
+              pedidos más abajo para verlos.
             </p>
           )}
 

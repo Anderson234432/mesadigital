@@ -98,6 +98,17 @@ exports.crearPedido = onCall({ region: 'us-central1', timeoutSeconds: 30, minIns
     db.doc(`restaurantes/${restauranteId}/_privado/mesaTokens`).get(),
     db.doc(`restaurantes/${restauranteId}`).get(),
   ]);
+  // El camino de fallback (firestore.rules, allow create de pedidos) ya exige
+  // restauranteExiste(restauranteId) — aquí faltaba el mismo chequeo. Sin él,
+  // si el maestro elimina un restaurante mientras un cliente tiene el menú
+  // abierto (eliminarRestaurante solo borra el documento raíz, no en cascada
+  // pedidos/platos/_privado — ver restaurantesRepository.js), un pedido
+  // enviado justo después se escribía igual vía Admin SDK en una subcolección
+  // huérfana que nadie con acceso al panel puede ya leer, mostrándole al
+  // cliente un "pedido enviado" exitoso que ninguna cocina real recibe.
+  if (!restauranteSnap.exists) {
+    throw new HttpsError('not-found', 'Este restaurante ya no existe.');
+  }
   const mesaTokens = privadoSnap.data()?.mesaTokens;
   if (mesaTokens && mesaTokens[mesaStr] !== token) {
     throw new HttpsError('permission-denied', 'Token de mesa inválido.');
@@ -424,34 +435,54 @@ exports.canjearInvitacion = onCall({ region: 'us-central1', timeoutSeconds: 30, 
   }
 
   // ── Validar el código ──────────────────────────────────────────────────────
+  // Todo en una transacción: leer intentos, decidir y (si el código no
+  // coincide) incrementar intentos, deben ser atómicos. Un read-then-write
+  // suelto aquí es explotable — varias peticiones concurrentes con códigos
+  // distintos leerían el mismo `intentos` antes de que ninguna escriba, y
+  // cada una escribiría `intentos+1` sobre ese mismo valor viejo (el
+  // contador nunca sube más allá de 1 sin importar cuántas peticiones en
+  // paralelo se manden), evadiendo por completo el límite de
+  // CODIGO_MAX_INTENTOS y habilitando fuerza bruta real contra el código de
+  // 6 dígitos vía paralelismo. La transacción serializa los intentos
+  // concurrentes contra el mismo documento, igual que el rate limit de
+  // crearPedido/enviarCodigoInvitacion.
   const codigoRef = invitacionRef.collection('_privado').doc('codigo');
-  const codigoSnap = await codigoRef.get();
-  if (!codigoSnap.exists) {
+  const resultadoCodigo = await db.runTransaction(async (tx) => {
+    const codigoSnap = await tx.get(codigoRef);
+    if (!codigoSnap.exists) return { estado: 'no-existe' };
+    const codigoData = codigoSnap.data();
+    if (codigoData.intentos >= CODIGO_MAX_INTENTOS) return { estado: 'agotado' };
+    if (!codigoData.expiraEn || codigoData.expiraEn.toMillis() < Date.now()) return { estado: 'vencido' };
+
+    const hashRecibido = hashCodigo(codigo, codigoData.salt);
+    const coincide = hashRecibido.length === codigoData.hash.length
+      && crypto.timingSafeEqual(Buffer.from(hashRecibido), Buffer.from(codigoData.hash));
+
+    if (!coincide) {
+      const nuevosIntentos = codigoData.intentos + 1;
+      tx.update(codigoRef, { intentos: nuevosIntentos });
+      return { estado: 'incorrecto', restantes: CODIGO_MAX_INTENTOS - nuevosIntentos };
+    }
+    return { estado: 'ok', email: codigoData.email };
+  });
+
+  if (resultadoCodigo.estado === 'no-existe') {
     throw new HttpsError('failed-precondition', 'No se ha enviado un código para esta invitación. Pide uno nuevo.');
   }
-  const codigoData = codigoSnap.data();
-  if (codigoData.intentos >= CODIGO_MAX_INTENTOS) {
+  if (resultadoCodigo.estado === 'agotado') {
     throw new HttpsError('failed-precondition', 'Demasiados intentos fallidos. Pide un código nuevo.');
   }
-  if (!codigoData.expiraEn || codigoData.expiraEn.toMillis() < Date.now()) {
+  if (resultadoCodigo.estado === 'vencido') {
     throw new HttpsError('failed-precondition', 'El código venció. Pide uno nuevo.');
   }
-
-  const hashRecibido = hashCodigo(codigo, codigoData.salt);
-  const coincide = hashRecibido.length === codigoData.hash.length
-    && crypto.timingSafeEqual(Buffer.from(hashRecibido), Buffer.from(codigoData.hash));
-
-  if (!coincide) {
-    const nuevosIntentos = codigoData.intentos + 1;
-    await codigoRef.update({ intentos: nuevosIntentos });
-    const restantes = CODIGO_MAX_INTENTOS - nuevosIntentos;
-    if (restantes <= 0) {
+  if (resultadoCodigo.estado === 'incorrecto') {
+    if (resultadoCodigo.restantes <= 0) {
       throw new HttpsError('failed-precondition', 'Código incorrecto. Se agotaron los intentos — pide un código nuevo.');
     }
-    throw new HttpsError('failed-precondition', `Código incorrecto. Te quedan ${restantes} intento(s).`);
+    throw new HttpsError('failed-precondition', `Código incorrecto. Te quedan ${resultadoCodigo.restantes} intento(s).`);
   }
 
-  const email = codigoData.email;
+  const email = resultadoCodigo.email;
 
   // ── Crear la cuenta ANTES de tocar la invitación: si falla aquí (contraseña
   // rechazada, correo registrado justo ahora por otra vía), la invitación
@@ -583,6 +614,32 @@ exports.limpiarPedidosAntiguos = onSchedule(
       if (borradosEnEstRest > 0) {
         console.log(`[${restauranteId}] pedidos archivados eliminados: ${borradosEnEstRest}`);
         totalBorrados += borradosEnEstRest;
+      }
+
+      // ── _ratelimits huérfanos ────────────────────────────────────────────
+      // Un documento por cliente/mesa que alguna vez pidió (ver crearPedido).
+      // Nada los borra nunca — ni siquiera limpiarUsuariosAnonimos, que borra
+      // la cuenta de Auth pero no toca esta colección de Firestore, que vive
+      // aparte. Cada ventana dura 60s; cualquier documento con windowStart de
+      // más de un día es indudablemente muerto (ese UID/mesa, si vuelve a
+      // pedir, sobrescribe el documento igual — no hace falta conservarlo).
+      // Try/catch propio: un fallo aquí no debe impedir la limpieza de
+      // pedidos archivados de arriba, ni la de los demás restaurantes.
+      try {
+        const cutoffRateLimit = Date.now() - 24 * 60 * 60 * 1000;
+        const ratelimitsSnap = await db
+          .collection(`restaurantes/${restauranteId}/_ratelimits`)
+          .where('windowStart', '<', cutoffRateLimit)
+          .limit(BATCH_SIZE)
+          .get();
+        if (!ratelimitsSnap.empty) {
+          const batchRL = db.batch();
+          ratelimitsSnap.docs.forEach((d) => batchRL.delete(d.ref));
+          await batchRL.commit();
+          console.log(`[${restauranteId}] _ratelimits huérfanos eliminados: ${ratelimitsSnap.size}`);
+        }
+      } catch (e) {
+        console.error(`[${restauranteId}] error limpiando _ratelimits:`, e.message);
       }
     }
 

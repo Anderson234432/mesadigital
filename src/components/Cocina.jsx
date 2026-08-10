@@ -116,6 +116,9 @@ function Cocina() {
     return () => {
       clearTimeout(retryTimerRef.current);
       if (unsubPedidosRef.current) unsubPedidosRef.current();
+      // Evita que un reconectar() en vuelo (ver abajo) reabra un listener
+      // después de que este efecto ya cerró el suyo.
+      resubscribeRef.current = null;
     };
   }, [restauranteId, acceso, horaCierreOperativo]);
 
@@ -123,7 +126,14 @@ function Cocina() {
   useEffect(() => {
     async function reconectar() {
       try { await reconectarFirestore(); } catch { /* intencional: reconexión best-effort, se reintenta con el listener */ }
-      if (resubscribeRef.current) resubscribeRef.current();
+      // enableNetwork() es async de verdad — si el componente se desmontó
+      // mientras esperaba (navegación fuera de Cocina.jsx), llamar
+      // resubscribeRef.current() ahora crearía un onSnapshot nuevo que nadie
+      // limpia nunca (fuga de listener, grave en una tablet que queda horas
+      // abierta). montadoRef ya está en false para entonces si hubo unmount;
+      // resubscribeRef.current también queda en null por la limpieza de
+      // arriba — se dejan ambos chequeos por claridad.
+      if (montadoRef.current && resubscribeRef.current) resubscribeRef.current();
     }
     const alVolver = () => {
       if (document.visibilityState === 'visible') reconectar();

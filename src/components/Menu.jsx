@@ -322,6 +322,9 @@ function Menu() {
       unsubRestaurante();
       unsubPlatos();
       if (subsRef.current.miMesa) subsRef.current.miMesa();
+      // Evita que un reconectar() en vuelo (ver abajo) reabra un listener
+      // después de que este efecto ya cerró el suyo.
+      resubscribeRef.current = null;
     };
   }, [authReady, restauranteId, numeroMesa, procesarPedidos, tokenUrl]);
 
@@ -329,7 +332,14 @@ function Menu() {
   useEffect(() => {
     async function reconectar() {
       try { await reconectarFirestore(); } catch { /* intencional: reconexión best-effort, se reintenta con el listener */ }
-      if (resubscribeRef.current) resubscribeRef.current();
+      // enableNetwork() es async de verdad — si el componente se desmontó
+      // mientras esperaba (navegación fuera de Menu.jsx), llamar
+      // resubscribeRef.current() ahora crearía un onSnapshot nuevo que nadie
+      // va a limpiar nunca (fuga de listener). montadoRef ya está en false
+      // para entonces si hubo unmount; resubscribeRef.current también queda
+      // en null por la limpieza del efecto de arriba, así que cualquiera de
+      // los dos chequeos alcanza — se dejan ambos por claridad.
+      if (montadoRef.current && resubscribeRef.current) resubscribeRef.current();
     }
     const alVolver = () => {
       if (document.visibilityState === 'visible') reconectar();
