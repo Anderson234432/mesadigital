@@ -50,6 +50,7 @@ const Cocina = lazy(() => import("./Cocina"));
 const PanelMaestro = lazy(() => import("./PanelMaestro"));
 const Login = lazy(() => import("./Login"));
 const Invitacion = lazy(() => import("./Invitacion"));
+const Carta = lazy(() => import("./Carta"));
 
 function Landing() {
   return (
@@ -153,6 +154,7 @@ function App() {
           <Routes>
           <Route path="/" element={<Landing />} />
           <Route path="/invitacion/:token" element={<Invitacion />} />
+          <Route path="/restaurante/:restauranteId/carta" element={<Carta />} />
           <Route path="/restaurante/:restauranteId/menu/:numeroMesa" element={<Menu />} />
           <Route path="/restaurante/:restauranteId/admin" element={usuario ? <Admin /> : <Login />} />
           <Route path="/restaurante/:restauranteId/cocina" element={usuario ? <Cocina /> : <Login />} />

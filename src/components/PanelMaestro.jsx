@@ -96,6 +96,20 @@ function PanelMaestro() {
     return `${import.meta.env.VITE_BASE_URL || window.location.origin}/invitacion/${token}`;
   }
 
+  function urlCarta(restauranteId) {
+    return `${import.meta.env.VITE_BASE_URL || window.location.origin}/restaurante/${restauranteId}/carta`;
+  }
+
+  async function copiarUrlCarta(restauranteId) {
+    try {
+      await navigator.clipboard.writeText(urlCarta(restauranteId));
+      setMensaje({ texto: 'Enlace de la carta copiado.', tipo: 'ok' });
+    } catch {
+      setMensaje({ texto: urlCarta(restauranteId), tipo: 'ok' }); // fallback: mostrarlo para copiar a mano
+    }
+    setTimeout(() => setMensaje({ texto: '', tipo: '' }), 3500);
+  }
+
   // Número de mesas a mostrar: lo que el maestro tocó en esta sesión,
   // o si no, lo que ya está guardado en Firestore.
   function mesasDe(r) {
@@ -279,9 +293,17 @@ function PanelMaestro() {
 
               <p className="text-neutral-500 text-xs mt-1 mb-3">ID: {r.id}</p>
 
-              <div className="flex gap-4 text-xs text-amber-400 mb-4">
+              <div className="flex flex-wrap gap-4 text-xs text-amber-400 mb-1 items-center">
                 <a href={`/restaurante/${r.id}/admin`} className="hover:underline">Admin →</a>
                 <a href={`/restaurante/${r.id}/cocina`} className="hover:underline">Cocina →</a>
+                <a href={`/restaurante/${r.id}/carta`} target="_blank" rel="noreferrer" className="hover:underline">Carta →</a>
+              </div>
+              <div className="flex gap-2 items-center mb-4">
+                <span className="text-neutral-600 text-xs font-mono truncate max-w-[200px]">{urlCarta(r.id)}</span>
+                <button onClick={() => copiarUrlCarta(r.id)}
+                  className="text-xs border border-neutral-600 text-neutral-400 px-2 py-1 hover:border-amber-400 hover:text-amber-400 transition-colors shrink-0 min-h-[32px]">
+                  Copiar carta
+                </button>
               </div>
 
               {/* Gestionar acceso */}

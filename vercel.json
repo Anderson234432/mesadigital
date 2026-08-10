@@ -5,6 +5,17 @@
       "destination": "/restaurante/:restauranteId/menu/:mesa"
     },
     {
+      "source": "/restaurante/:restauranteId/carta",
+      "has": [
+        {
+          "type": "header",
+          "key": "user-agent",
+          "value": ".*(facebookexternalhit|Facebot|Twitterbot|WhatsApp|Slackbot|LinkedInBot|TelegramBot|Discordbot|Googlebot|bingbot|Applebot|Pinterest|redditbot|vkShare|W3C_Validator).*"
+        }
+      ],
+      "destination": "/api/carta-meta?restauranteId=:restauranteId"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }

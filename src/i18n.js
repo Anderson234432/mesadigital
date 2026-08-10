@@ -29,6 +29,11 @@ export const t = {
     propinaLabel: (pct) => `Propina legal (${pct}%)`,
     totalLabel: 'Total',
     creditoFooter: 'Hecho por Anderson Díaz',
+    agotado: 'Agotado',
+    cartaLlamadoAccion: '¿Estás en el restaurante? Escanea el código QR de tu mesa para hacer tu pedido.',
+    cartaSinPlatos: 'Este restaurante todavía no cargó su menú.',
+    cartaRestauranteNoExiste: 'No encontramos este restaurante.',
+    cartaTituloPagina: (nombre) => `${nombre} — Menú`,
   },
   en: {
     bienvenido: 'Welcome to',
@@ -57,5 +62,10 @@ export const t = {
     propinaLabel: (pct) => `Service charge (${pct}%)`,
     totalLabel: 'Total',
     creditoFooter: 'Built by Anderson Díaz',
+    agotado: 'Sold out',
+    cartaLlamadoAccion: 'Are you at the restaurant? Scan the QR code at your table to order.',
+    cartaSinPlatos: 'This restaurant hasn\'t added its menu yet.',
+    cartaRestauranteNoExiste: "We couldn't find this restaurant.",
+    cartaTituloPagina: (nombre) => `${nombre} — Menu`,
   },
 };

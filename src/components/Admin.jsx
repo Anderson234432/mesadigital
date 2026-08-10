@@ -74,6 +74,9 @@ export default function Admin() {
     descripcion: '', imagenUrl: '', disponible: true, tiempoMin: '', orden: '',
   };
 
+  // Mismo patrón que urlInvitacion en PanelMaestro.jsx.
+  const urlCarta = `${import.meta.env.VITE_BASE_URL || window.location.origin}/restaurante/${restauranteId}/carta`;
+
   // ─── Valores derivados ────────────────────────────────────
   const fechaSeleccionada = useMemo(() => {
     const [y, m, d] = fechaFiltro.split('-').map(Number);
@@ -483,6 +486,15 @@ export default function Admin() {
     }
   };
 
+  const copiarUrlCarta = async () => {
+    try {
+      await navigator.clipboard.writeText(urlCarta);
+      if (montadoRef.current) mostrarMensaje('Enlace de la carta copiado.', 'ok');
+    } catch {
+      if (montadoRef.current) mostrarMensaje(urlCarta, 'ok');
+    }
+  };
+
   const archivarMesaAdmin = (ids) =>
     actualizarEstadoMesa(restauranteId, ids, 'archivado')
       .catch(() => mostrarMensaje('Error al cerrar la mesa.', 'error'));
@@ -534,6 +546,16 @@ export default function Admin() {
         <button onClick={cerrarSesion}
           className="text-xs border border-neutral-600 text-neutral-400 px-3 py-1 hover:border-red-400 hover:text-red-400 transition-colors">
           Cerrar sesión
+        </button>
+      </div>
+
+      {/* Carta pública — para compartir en redes */}
+      <div className="bg-neutral-900 border-b border-neutral-800 px-6 py-3 flex flex-wrap items-center gap-3">
+        <span className="text-neutral-500 text-xs shrink-0">Tu carta pública (para Instagram, WhatsApp, etc.):</span>
+        <span className="text-neutral-400 text-xs font-mono truncate flex-1 min-w-0">{urlCarta}</span>
+        <button onClick={copiarUrlCarta}
+          className="text-xs border border-amber-400 text-amber-400 px-3 py-1 hover:bg-amber-400 hover:text-black transition-colors shrink-0 min-h-[32px]">
+          Copiar enlace
         </button>
       </div>
 
