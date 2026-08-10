@@ -30,6 +30,7 @@ function PanelMaestro() {
   const [linkInvitacion, setLinkInvitacion] = useState(null); // { restauranteId, rol, token }
   const [invitando, setInvitando] = useState(false);
   const [confirmarRevocarToken, setConfirmarRevocarToken] = useState(null);
+  const [mensaje, setMensaje] = useState({ texto: '', tipo: '' });
 
   useEffect(() => {
     return subscribeRestaurantes(setRestaurantes);
@@ -74,13 +75,20 @@ function PanelMaestro() {
     }
   }
 
+  // Antes esto cerraba el diálogo de confirmación en el `finally` sin
+  // importar si la escritura falló — el maestro veía el mismo resultado
+  // visual ("listo, revocado") tanto si funcionó como si no. Si en realidad
+  // falló, la invitación seguía siendo canjeable con ese link, sin ningún
+  // aviso de que no quedó revocada de verdad. Ahora el diálogo solo se
+  // cierra si la escritura tuvo éxito; si falla, queda abierto y se avisa.
   async function handleRevocarInvitacion(token) {
     try {
       await revocarInvitacion(token);
+      setConfirmarRevocarToken(null);
     } catch (e) {
       console.error('Error revocando invitación:', e);
-    } finally {
-      setConfirmarRevocarToken(null);
+      setMensaje({ texto: 'No se pudo revocar la invitación. Intenta de nuevo.', tipo: 'error' });
+      setTimeout(() => setMensaje({ texto: '', tipo: '' }), 3500);
     }
   }
 
@@ -186,6 +194,15 @@ function PanelMaestro() {
           Cerrar sesión
         </button>
       </div>
+
+      {/* Notificación */}
+      {mensaje.texto && (
+        <div className="fixed top-4 left-0 right-0 flex justify-center z-50">
+          <div className={`px-6 py-3 font-bold text-sm text-center max-w-sm mx-4 ${mensaje.tipo === 'ok' ? 'bg-amber-400 text-black' : 'bg-red-500 text-white'}`}>
+            {mensaje.texto}
+          </div>
+        </div>
+      )}
 
       <div className="max-w-lg mx-auto px-4 py-6">
 

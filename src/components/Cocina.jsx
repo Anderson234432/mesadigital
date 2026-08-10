@@ -16,6 +16,7 @@ function Cocina() {
   const [disponibilidadAbierta, setDisponibilidadAbierta] = useState(false);
   const [busquedaPlatos, setBusquedaPlatos] = useState('');
   const [sonidoActivo, setSonidoActivo] = useState(false);
+  const [mensaje, setMensaje] = useState({ texto: '', tipo: '' });
   const pedidosVistos = useRef(null);
   const [ahora, setAhora] = useState(Date.now());
   const audioContextRef = useRef(null);
@@ -171,14 +172,26 @@ function Cocina() {
   // ─── Acciones ─────────────────────────────────────────────
   const cerrarSesion = () => logout().catch(console.error);
 
+  // Antes estos tres solo hacían console.error: si la escritura fallaba
+  // (red inestable, permisos), el cocinero veía la interfaz responder igual
+  // que si hubiera funcionado — el pedido seguía 'pendiente' en Firestore
+  // sin ningún aviso de que su acción no se guardó.
+  function mostrarMensaje(texto, tipo = 'ok') {
+    setMensaje({ texto, tipo });
+    setTimeout(() => { if (montadoRef.current) setMensaje({ texto: '', tipo: '' }); }, 3500);
+  }
+
   const marcarListoMesa = (ids) =>
-    actualizarEstadoMesa(restauranteId, ids, 'listo').catch(console.error);
+    actualizarEstadoMesa(restauranteId, ids, 'listo')
+      .catch(() => mostrarMensaje('No se pudo marcar la mesa como lista. Intenta de nuevo.', 'error'));
 
   const archivarMesa = (ids) =>
-    actualizarEstadoMesa(restauranteId, ids, 'archivado').catch(console.error);
+    actualizarEstadoMesa(restauranteId, ids, 'archivado')
+      .catch(() => mostrarMensaje('No se pudo archivar la mesa. Intenta de nuevo.', 'error'));
 
   const descartarLlamada = (llamadaIds) =>
-    actualizarEstadoMesa(restauranteId, llamadaIds, 'archivado').catch(console.error);
+    actualizarEstadoMesa(restauranteId, llamadaIds, 'archivado')
+      .catch(() => mostrarMensaje('No se pudo descartar la llamada. Intenta de nuevo.', 'error'));
 
   // ─── Helper tiempo transcurrido ───────────────────────────
   function tiempoTranscurrido(timestamp) {
@@ -264,6 +277,15 @@ function Cocina() {
           </button>
         </div>
       </div>
+
+      {/* Notificación */}
+      {mensaje.texto && (
+        <div className="fixed top-4 left-0 right-0 flex justify-center z-50">
+          <div className={`px-6 py-3 font-bold text-sm text-center max-w-sm mx-4 ${mensaje.tipo === 'ok' ? 'bg-amber-400 text-black' : 'bg-red-500 text-white'}`}>
+            {mensaje.texto}
+          </div>
+        </div>
+      )}
 
       {/* Pedidos */}
       <div className="max-w-2xl mx-auto px-4 py-6 space-y-4">
