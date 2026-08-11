@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { useParams } from 'react-router-dom';
 import {
   verificarAccesoAdmin, guardarTiempos, guardarImpuestos,
-  guardarMarca, guardarHorarios, guardarContacto, guardarBotones,
+  guardarMarca, guardarHorarios, guardarBotones,
 } from '../services/restaurantesService';
 import { subscribePlatos, guardarPlato, eliminarPlato, toggleDisponible } from '../services/platosService';
 import { subscribePedidosDia, subscribePedidosPeriodo, subscribeVentasDiarias, actualizarEstadoMesa } from '../services/pedidosService';
@@ -10,8 +10,7 @@ import { logout, getUid } from '../services/authService';
 import { rangoDiaOperativo, fechaOperativaHoy, parsearHoraCierre } from '../utils/fechaOperativa';
 import { derivarHoraCierreOperativo } from '../utils/horarioRestaurante';
 import { subirImagenMarca } from '../services/storageService';
-import { googleMapsUrlValida, AYUDA_GOOGLE_MAPS_INVALIDO, normalizarWhatsapp, normalizarInstagram, normalizarTelefono } from '../utils/contacto';
-import { agregarBotonesFaltantes, desactivarBotonesSinDato, origenBoton } from '../utils/botonesPortada';
+import { destinoBotonValido, normalizarDestinoBoton, migrarDestinosDesdeContacto } from '../utils/contacto';
 
 const DIAS_SEMANA = ['lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado', 'domingo'];
 const DIAS_SEMANA_LABEL = {
@@ -27,6 +26,13 @@ const TIPOS_BOTON = [
   { tipo: 'telefono', label: 'Llamar' },
   { tipo: 'enlace', label: 'Enlace libre (reservas, eventos, etc.)' },
 ];
+const AYUDA_DESTINO = {
+  mapa: 'Pega el enlace de Google Maps. En Maps: busca tu restaurante → Compartir → Copiar vínculo.',
+  whatsapp: 'Número con código de país. Ej: 18095551234',
+  instagram: '@usuario o el enlace completo',
+  telefono: 'Número a llamar',
+  enlace: 'Cualquier URL. Úsalo para reservaciones, eventos, lo que necesites.',
+};
 
 function nuevoBotonId() {
   return typeof crypto?.randomUUID === 'function' ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -56,7 +62,6 @@ export default function Admin() {
   const [acceso, setAcceso] = useState(null);
   const [nombreRestaurante, setNombreRestaurante] = useState('');
   const [platos, setPlatos] = useState([]);
-  const [platosListos, setPlatosListos] = useState(false); // true tras la primera entrega de subscribePlatos — distingue "aún cargando" de "cargado y vacío"
   const [pedidos, setPedidos] = useState([]);
   const [ventasDiarias, setVentasDiarias] = useState([]);
   const [fechaFiltro, setFechaFiltro] = useState(localDateStr);
@@ -75,14 +80,12 @@ export default function Admin() {
   const [impuestosForm, setImpuestosForm] = useState({});
   const [horaCierreOperativo, setHoraCierreOperativo] = useState('00:00'); // valor guardado, usado para todos los cálculos — derivado de horariosForm al guardar
   const [horaCierreConfiguradaEn, setHoraCierreConfiguradaEn] = useState(null);
-  const [marcaForm, setMarcaForm] = useState({ logoUrl: '', portadaUrl: '', eslogan: '' });
+  const [marcaForm, setMarcaForm] = useState({ logoUrl: '', portadaUrl: '', eslogan: '', direccion: '' });
   const [logoFile, setLogoFile] = useState(null);
   const [portadaFile, setPortadaFile] = useState(null);
   const [subiendoMarca, setSubiendoMarca] = useState(false);
   const [horariosForm, setHorariosForm] = useState({});
   const [guardandoHorarios, setGuardandoHorarios] = useState(false);
-  const [contactoForm, setContactoForm] = useState({ direccion: '', googleMapsUrl: '', telefono: '', whatsapp: '', instagram: '' });
-  const [guardandoContacto, setGuardandoContacto] = useState(false);
   const [botonesForm, setBotonesForm] = useState([]);
   const [guardandoBotones, setGuardandoBotones] = useState(false);
   const [guardando, setGuardando] = useState(false);
@@ -95,8 +98,6 @@ export default function Admin() {
     montadoRef.current = true;
     return () => { montadoRef.current = false; };
   }, []);
-
-  const bootstrapBotonesHechoRef = useRef(false);
 
   const formVacio = {
     nombre: '', nombreEn: '', precio: '', categoria: '', categoriaEn: '',
@@ -375,18 +376,34 @@ export default function Admin() {
           setTiemposForm(tiempos);
           setImpuestosForm(impuestos);
           setHoraCierreOperativo(hc);
-          setMarcaForm({ logoUrl: marca.logoUrl || '', portadaUrl: marca.portadaUrl || '', eslogan: marca.eslogan || '' });
+          // La dirección vivía en `contacto.direccion` (sistema anterior de
+          // Contacto) — si `marca` todavía no tiene la suya, se migra al
+          // vuelo (ver el guardado más abajo, después de setBotonesForm).
+          const direccionCargada = marca.direccion || contacto.direccion || '';
+          setMarcaForm({ logoUrl: marca.logoUrl || '', portadaUrl: marca.portadaUrl || '', eslogan: marca.eslogan || '', direccion: direccionCargada });
           // Los 7 días siempre presentes en el form, aunque el restaurante
           // todavía no haya configurado ninguno — así cada campo tiene un
           // valor controlado desde el primer render (nunca undefined).
           setHorariosForm(
             DIAS_SEMANA.reduce((acc, d) => ({ ...acc, [d]: { ...HORARIO_DIA_VACIO, ...(horarios[d] || {}) } }), {})
           );
-          setContactoForm({
-            direccion: contacto.direccion || '', googleMapsUrl: contacto.googleMapsUrl || '',
-            telefono: contacto.telefono || '', whatsapp: contacto.whatsapp || '', instagram: contacto.instagram || '',
-          });
-          setBotonesForm(botones.length > 0 ? botones : []);
+          // Migración desde el sistema anterior: los botones creados cuando
+          // los destinos se resolvían en vivo desde `contacto` tienen
+          // `destino` vacío — se copian una sola vez, al cargar el panel.
+          // Se persiste de inmediato (no solo en memoria) porque Portada.jsx
+          // es pública y ya lee `boton.destino` directamente — si esto
+          // quedara solo en memoria, esos botones se verían rotos ahí hasta
+          // que alguien entrara a Admin y guardara a mano.
+          const botonesCargados = botones.length > 0 ? botones : [];
+          const { botones: botonesMigrados, cambio: botonesCambiaron } = migrarDestinosDesdeContacto(botonesCargados, contacto);
+          setBotonesForm(botonesMigrados);
+          if (botonesCambiaron) {
+            guardarBotones(restauranteId, botonesMigrados).catch((e) => console.error('Error migrando destinos de botones:', e));
+          }
+          if (!marca.direccion && contacto.direccion) {
+            guardarMarca(restauranteId, { logoUrl: marca.logoUrl || '', portadaUrl: marca.portadaUrl || '', eslogan: marca.eslogan || '', direccion: contacto.direccion })
+              .catch((e) => console.error('Error migrando la dirección a Marca:', e));
+          }
           // Normalizado a Date de una vez — así el resto del componente nunca
           // necesita saber si vino de Firestore (Timestamp) o de un guardado
           // optimista recién hecho (Date directo).
@@ -408,37 +425,8 @@ export default function Admin() {
         if (montadoRef.current) setAcceso(false);
       });
 
-    return subscribePlatos(restauranteId, (lista) => {
-      setPlatos(lista);
-      setPlatosListos(true);
-    });
+    return subscribePlatos(restauranteId, setPlatos);
   }, [restauranteId]);
-
-  // ─── Effect 1b: botones automáticos al abrir el panel ────────────────────
-  // Cubre la migración: un restaurante que ya tenía contacto guardado (o ya
-  // tenía platos) antes de este cambio nunca dispararía la creación
-  // automática si esta solo viviera en handleGuardarContacto — no va a
-  // volver a guardar algo que ya guardó. Se ejecuta una sola vez por sesión
-  // del panel (bootstrapBotonesHechoRef), y espera a que AMBOS — acceso y la
-  // primera entrega de platos — estén listos, para poder decidir el botón de
-  // carta con platosListos en vez de con platos.length === 0 (que también es
-  // el valor inicial antes de cargar). Lee botonesForm/contactoForm/platos
-  // ya cargados en este mismo render — deliberadamente no están en las deps
-  // para no re-disparar el efecto en cada edición del formulario.
-  useEffect(() => {
-    if (acceso !== true || !platosListos) return;
-    if (bootstrapBotonesHechoRef.current) return;
-    bootstrapBotonesHechoRef.current = true;
-    const { botones: nuevosBotones, cambio } = agregarBotonesFaltantes(botonesForm, contactoForm, platos.length > 0);
-    if (cambio) {
-      // Sincronización con Firestore (un sistema externo), no estado
-      // derivado — el caso legítimo que la regla no distingue.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setBotonesForm(nuevosBotones);
-      guardarBotones(restauranteId, nuevosBotones).catch((e) => console.error('Error creando botones automáticos:', e));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [acceso, platosListos]);
 
   // ─── Effect 2: pedidos del período ───────────────────────
   useEffect(() => {
@@ -541,7 +529,7 @@ export default function Admin() {
       // comprime primero (subirImagenMarca ya valida el límite de 3MB).
       if (logoFile) logoUrl = await subirImagenMarca(logoFile, restauranteId, 'logo');
       if (portadaFile) portadaUrl = await subirImagenMarca(portadaFile, restauranteId, 'portada');
-      const nuevaMarca = { logoUrl, portadaUrl, eslogan: marcaForm.eslogan || '' };
+      const nuevaMarca = { logoUrl, portadaUrl, eslogan: marcaForm.eslogan || '', direccion: marcaForm.direccion || '' };
       await guardarMarca(restauranteId, nuevaMarca);
       if (!montadoRef.current) return;
       setMarcaForm(nuevaMarca);
@@ -606,47 +594,13 @@ export default function Admin() {
     }
   };
 
-  // ── Contacto ─────────────────────────────────────────────────────────────
-  const handleGuardarContacto = async () => {
-    if (!googleMapsUrlValida(contactoForm.googleMapsUrl)) {
-      mostrarMensaje(AYUDA_GOOGLE_MAPS_INVALIDO, 'error');
-      return;
-    }
-    const contactoNormalizado = {
-      ...contactoForm,
-      whatsapp: normalizarWhatsapp(contactoForm.whatsapp),
-      instagram: normalizarInstagram(contactoForm.instagram),
-      telefono: normalizarTelefono(contactoForm.telefono),
-    };
-    setGuardandoContacto(true);
-    try {
-      // Guardar contacto ya es la intención de mostrarlo — crea los botones
-      // que falten y apaga (sin borrar) los que se quedaron sin dato. No
-      // toca 'carta' (tienePlatos: false aquí, eso lo maneja el efecto de
-      // arranque) ni ningún botón que el dueño ya tenga configurado.
-      const { botones: conFaltantes } = agregarBotonesFaltantes(botonesForm, contactoNormalizado, false);
-      const { botones: botonesFinal } = desactivarBotonesSinDato(conFaltantes, contactoNormalizado);
-      await guardarContacto(restauranteId, contactoNormalizado, botonesFinal);
-      if (montadoRef.current) {
-        setContactoForm(contactoNormalizado);
-        setBotonesForm(botonesFinal);
-        mostrarMensaje('Contacto guardado.', 'ok');
-      }
-    } catch {
-      if (montadoRef.current) mostrarMensaje('Error al guardar el contacto.', 'error');
-    } finally {
-      if (montadoRef.current) setGuardandoContacto(false);
-    }
-  };
-
   // ── Botones de la portada ────────────────────────────────────────────────
-  // Los 5 tipos automáticos (mapa/whatsapp/instagram/telefono/carta) se
-  // crean solos desde Contacto y desde el efecto de arranque — "+ Agregar
-  // enlace" queda solo para enlaces libres (reservaciones, eventos, etc.).
+  // Cada botón lleva su propio destino — alta manual, como antes de la
+  // sección de Contacto.
   const handleAgregarBoton = () => {
     setBotonesForm((prev) => [
       ...prev,
-      { id: nuevoBotonId(), etiqueta: '', etiquetaEn: '', tipo: 'enlace', destino: '', activo: true, orden: prev.length },
+      { id: nuevoBotonId(), etiqueta: '', etiquetaEn: '', tipo: 'carta', destino: '', activo: true, orden: prev.length },
     ]);
   };
 
@@ -670,10 +624,24 @@ export default function Admin() {
   };
 
   const handleGuardarBotones = async () => {
+    // Un botón ACTIVO necesita un destino válido para su tipo — uno apagado
+    // puede quedarse a medio llenar sin bloquear el guardado de los demás.
+    const invalido = botonesForm.find((b) => b.activo && !destinoBotonValido(b.tipo, b.destino));
+    if (invalido) {
+      const etiqueta = invalido.etiqueta || TIPOS_BOTON.find((t) => t.tipo === invalido.tipo)?.label || 'Botón';
+      mostrarMensaje(`"${etiqueta}" está activo pero no tiene un destino válido.`, 'error');
+      return;
+    }
+    const botonesNormalizados = botonesForm.map((b, i) => ({
+      ...b, orden: i, destino: normalizarDestinoBoton(b.tipo, b.destino),
+    }));
     setGuardandoBotones(true);
     try {
-      await guardarBotones(restauranteId, botonesForm.map((b, i) => ({ ...b, orden: i })));
-      if (montadoRef.current) mostrarMensaje('Botones guardados.', 'ok');
+      await guardarBotones(restauranteId, botonesNormalizados);
+      if (montadoRef.current) {
+        setBotonesForm(botonesNormalizados);
+        mostrarMensaje('Botones guardados.', 'ok');
+      }
     } catch {
       if (montadoRef.current) mostrarMensaje('Error al guardar los botones.', 'error');
     } finally {
@@ -708,9 +676,6 @@ export default function Admin() {
   const marcarListaMesaAdmin = (ids) =>
     actualizarEstadoMesa(restauranteId, ids, 'listo')
       .catch(() => mostrarMensaje('Error al marcar la mesa.', 'error'));
-
-  const tienePlatos = platos.length > 0;
-  const googleMapsInvalido = !!contactoForm.googleMapsUrl && !googleMapsUrlValida(contactoForm.googleMapsUrl);
 
   // ─── Early returns ────────────────────────────────────────
   if (acceso === null) return <div className="min-h-screen bg-neutral-950" />;
@@ -999,6 +964,13 @@ export default function Admin() {
                   placeholder="Una experiencia de sabor, ritmo y esencia"
                   className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-base" />
               </div>
+              <div>
+                <label className="text-neutral-500 text-xs block mb-1">Dirección (se muestra en la portada)</label>
+                <input type="text" value={marcaForm.direccion}
+                  onChange={(e) => setMarcaForm((f) => ({ ...f, direccion: e.target.value }))}
+                  placeholder="Calle, número, sector, ciudad"
+                  className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-base" />
+              </div>
             </div>
             <button onClick={handleGuardarMarca} disabled={subiendoMarca}
               className="mt-4 bg-amber-400 text-black px-6 py-2 font-bold hover:bg-amber-300 transition-colors disabled:opacity-50 min-h-[44px]">
@@ -1049,99 +1021,63 @@ export default function Admin() {
             </button>
           </div>
 
-          {/* Contacto */}
-          <div className="border-t border-neutral-800 pt-5 mt-5">
-            <h3 className="text-neutral-300 text-sm font-semibold mb-3">Contacto</h3>
-            <div className="space-y-3">
-              <input type="text" value={contactoForm.direccion}
-                onChange={(e) => setContactoForm((f) => ({ ...f, direccion: e.target.value }))}
-                placeholder="Dirección"
-                className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-base" />
-              <div>
-                <input type="text" value={contactoForm.googleMapsUrl}
-                  onChange={(e) => setContactoForm((f) => ({ ...f, googleMapsUrl: e.target.value }))}
-                  placeholder="Enlace de Google Maps"
-                  className={`w-full bg-neutral-900 border px-3 py-2 text-white placeholder-neutral-500 focus:outline-none text-base ${
-                    googleMapsInvalido ? 'border-red-500' : 'border-neutral-700 focus:border-amber-400'}`} />
-                {googleMapsInvalido && (
-                  <p className="text-red-400 text-xs mt-1">{AYUDA_GOOGLE_MAPS_INVALIDO}</p>
-                )}
-              </div>
-              <input type="text" value={contactoForm.telefono}
-                onChange={(e) => setContactoForm((f) => ({ ...f, telefono: e.target.value }))}
-                placeholder="Teléfono"
-                className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-base" />
-              <div>
-                <input type="text" value={contactoForm.whatsapp}
-                  onChange={(e) => setContactoForm((f) => ({ ...f, whatsapp: e.target.value }))}
-                  placeholder="WhatsApp (con código de país, ej. 18095551234)"
-                  className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-base" />
-                {contactoForm.whatsapp.replace(/\D/g, '').length === 10 && (
-                  <p className="text-neutral-500 text-xs mt-1">Se guardará como {normalizarWhatsapp(contactoForm.whatsapp)} (le agregamos el código de país).</p>
-                )}
-              </div>
-              <input type="text" value={contactoForm.instagram}
-                onChange={(e) => setContactoForm((f) => ({ ...f, instagram: e.target.value }))}
-                placeholder="Instagram (@usuario o enlace)"
-                className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-base" />
-            </div>
-            <button onClick={handleGuardarContacto} disabled={guardandoContacto}
-              className="mt-4 bg-amber-400 text-black px-6 py-2 font-bold hover:bg-amber-300 transition-colors disabled:opacity-50 min-h-[44px]">
-              {guardandoContacto ? 'Guardando...' : 'Guardar contacto'}
-            </button>
-          </div>
-
           {/* Botones */}
           <div className="border-t border-neutral-800 pt-5 mt-5">
             <h3 className="text-neutral-300 text-sm font-semibold mb-1">Botones de la portada</h3>
             <p className="text-neutral-600 text-xs mb-3">
-              Se crean solos cuando guardas tus datos de contacto. Aquí puedes cambiarles el nombre, reordenarlos o
-              apagar los que no quieras mostrar.
+              Cada botón lleva su propio destino. Agrega los que quieras mostrar y llena a dónde debe llevar cada uno.
             </p>
             <div className="space-y-3">
-              {botonesForm.map((b, i) => (
-                <div key={b.id} className="border border-neutral-800 p-3 space-y-2">
-                  <div className="flex items-center gap-2">
-                    <select value={b.tipo} onChange={(e) => handleCambiarBoton(b.id, 'tipo', e.target.value)}
-                      className="bg-neutral-900 border border-neutral-700 px-2 py-2 text-white text-sm focus:outline-none focus:border-amber-400">
-                      {TIPOS_BOTON.map((tb) => <option key={tb.tipo} value={tb.tipo}>{tb.label}</option>)}
-                    </select>
-                    <div className="flex gap-1 ml-auto">
-                      <button type="button" onClick={() => handleMoverBoton(b.id, -1)} disabled={i === 0}
-                        className="text-xs border border-neutral-700 text-neutral-400 px-2 py-1 hover:border-amber-400 disabled:opacity-30 min-h-[32px]">▲</button>
-                      <button type="button" onClick={() => handleMoverBoton(b.id, 1)} disabled={i === botonesForm.length - 1}
-                        className="text-xs border border-neutral-700 text-neutral-400 px-2 py-1 hover:border-amber-400 disabled:opacity-30 min-h-[32px]">▼</button>
-                      <button type="button" onClick={() => handleQuitarBoton(b.id)}
-                        className="text-xs border border-neutral-700 text-neutral-400 px-2 py-1 hover:border-red-400 hover:text-red-400 min-h-[32px]">✕</button>
+              {botonesForm.map((b, i) => {
+                const destinoInvalido = b.activo && !destinoBotonValido(b.tipo, b.destino);
+                return (
+                  <div key={b.id} className="border border-neutral-800 p-3 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <select value={b.tipo} onChange={(e) => handleCambiarBoton(b.id, 'tipo', e.target.value)}
+                        className="bg-neutral-900 border border-neutral-700 px-2 py-2 text-white text-sm focus:outline-none focus:border-amber-400">
+                        {TIPOS_BOTON.map((tb) => <option key={tb.tipo} value={tb.tipo}>{tb.label}</option>)}
+                      </select>
+                      <div className="flex gap-1 ml-auto">
+                        <button type="button" onClick={() => handleMoverBoton(b.id, -1)} disabled={i === 0}
+                          className="text-xs border border-neutral-700 text-neutral-400 px-2 py-1 hover:border-amber-400 disabled:opacity-30 min-h-[32px]">▲</button>
+                        <button type="button" onClick={() => handleMoverBoton(b.id, 1)} disabled={i === botonesForm.length - 1}
+                          className="text-xs border border-neutral-700 text-neutral-400 px-2 py-1 hover:border-amber-400 disabled:opacity-30 min-h-[32px]">▼</button>
+                        <button type="button" onClick={() => handleQuitarBoton(b.id)}
+                          className="text-xs border border-neutral-700 text-neutral-400 px-2 py-1 hover:border-red-400 hover:text-red-400 min-h-[32px]">✕</button>
+                      </div>
                     </div>
-                  </div>
-                  <input type="text" value={b.etiqueta} onChange={(e) => handleCambiarBoton(b.id, 'etiqueta', e.target.value)}
-                    placeholder="Etiqueta en español"
-                    className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 text-base focus:outline-none focus:border-amber-400" />
-                  <input type="text" value={b.etiquetaEn} onChange={(e) => handleCambiarBoton(b.id, 'etiquetaEn', e.target.value)}
-                    placeholder="Etiqueta en inglés (opcional)"
-                    className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 text-base focus:outline-none focus:border-amber-400" />
-                  {b.tipo === 'enlace' ? (
-                    <input type="text" value={b.destino} onChange={(e) => handleCambiarBoton(b.id, 'destino', e.target.value)}
-                      placeholder="URL de destino (https://...)"
+                    <input type="text" value={b.etiqueta} onChange={(e) => handleCambiarBoton(b.id, 'etiqueta', e.target.value)}
+                      placeholder="Etiqueta en español"
                       className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 text-base focus:outline-none focus:border-amber-400" />
-                  ) : (
-                    <p className="text-neutral-600 text-xs">{origenBoton(b.tipo, contactoForm, tienePlatos)}</p>
-                  )}
-                  <label className="flex items-center gap-2 text-xs text-neutral-500">
-                    <input type="checkbox" checked={b.activo} onChange={(e) => handleCambiarBoton(b.id, 'activo', e.target.checked)} />
-                    Activo
-                  </label>
-                </div>
-              ))}
+                    <input type="text" value={b.etiquetaEn} onChange={(e) => handleCambiarBoton(b.id, 'etiquetaEn', e.target.value)}
+                      placeholder="Etiqueta en inglés (opcional)"
+                      className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 text-base focus:outline-none focus:border-amber-400" />
+                    {b.tipo !== 'carta' && (
+                      <div>
+                        <input type="text" value={b.destino} onChange={(e) => handleCambiarBoton(b.id, 'destino', e.target.value)}
+                          placeholder={AYUDA_DESTINO[b.tipo] || 'Destino'}
+                          className={`w-full bg-neutral-900 border px-3 py-2 text-white placeholder-neutral-500 text-base focus:outline-none ${
+                            destinoInvalido ? 'border-red-500' : 'border-neutral-700 focus:border-amber-400'}`} />
+                        {destinoInvalido && (
+                          <p className="text-red-400 text-xs mt-1">Este botón está activo pero no tiene un destino válido — no se guardará así.</p>
+                        )}
+                      </div>
+                    )}
+                    <label className="flex items-center gap-2 text-xs text-neutral-500">
+                      <input type="checkbox" checked={b.activo} onChange={(e) => handleCambiarBoton(b.id, 'activo', e.target.checked)} />
+                      Activo
+                    </label>
+                  </div>
+                );
+              })}
               {botonesForm.length === 0 && (
-                <p className="text-neutral-600 text-xs">Guarda tus datos de contacto arriba y los botones aparecerán aquí.</p>
+                <p className="text-neutral-600 text-xs">Sin botones todavía. Agrega los que quieras mostrar en tu portada.</p>
               )}
             </div>
             <div className="flex gap-3 mt-4">
               <button onClick={handleAgregarBoton}
                 className="border border-neutral-600 text-neutral-400 px-4 py-2 text-sm hover:border-amber-400 hover:text-amber-400 transition-colors min-h-[44px]">
-                + Agregar enlace
+                + Agregar botón
               </button>
               <button onClick={handleGuardarBotones} disabled={guardandoBotones}
                 className="bg-amber-400 text-black px-6 py-2 font-bold hover:bg-amber-300 transition-colors disabled:opacity-50 min-h-[44px]">

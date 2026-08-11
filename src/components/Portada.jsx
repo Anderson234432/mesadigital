@@ -22,29 +22,27 @@ function urlInstagram(valor) {
   return `https://instagram.com/${valor.replace(/^@/, '')}`;
 }
 
-// Cada botón "de contacto" (mapa/whatsapp/instagram/teléfono) apunta al dato
-// correspondiente de `contacto` — una sola fuente de verdad por restaurante,
-// en vez de repetir el mismo número/URL en cada botón. `destino` en el
-// documento del botón solo se usa para tipo 'enlace' (URL libre) — para los
-// demás tipos existe en el modelo por uniformidad, pero no se lee aquí.
-function resolverBoton(boton, restauranteId, contacto, nombre, lang) {
+// Cada botón lleva su propio destino (campo `destino`) — ya no existe una
+// sección de Contacto centralizada de la que resolver en vivo. 'carta' es
+// la única excepción: siempre va a la ruta de la carta, sin campo propio.
+function resolverBoton(boton, restauranteId, nombre, lang) {
   switch (boton.tipo) {
     case 'carta':
       return { href: `/restaurante/${restauranteId}/carta`, externo: false };
     case 'mapa':
-      return contacto.googleMapsUrl ? { href: contacto.googleMapsUrl, externo: true } : null;
+      return boton.destino ? { href: boton.destino, externo: true } : null;
     case 'whatsapp': {
-      const numero = (contacto.whatsapp || '').replace(/\D/g, '');
+      const numero = (boton.destino || '').replace(/\D/g, '');
       if (!numero) return null;
       const mensaje = encodeURIComponent(t[lang].whatsappMensajePredefinido(nombre));
       return { href: `https://wa.me/${numero}?text=${mensaje}`, externo: true };
     }
     case 'instagram': {
-      const url = urlInstagram(contacto.instagram);
+      const url = urlInstagram(boton.destino);
       return url ? { href: url, externo: true } : null;
     }
     case 'telefono':
-      return contacto.telefono ? { href: `tel:${contacto.telefono}`, externo: false } : null;
+      return boton.destino ? { href: `tel:${boton.destino}`, externo: false } : null;
     case 'enlace':
       return boton.destino ? { href: boton.destino, externo: true } : null;
     default:
@@ -116,11 +114,10 @@ function Portada() {
 
   const botonesActivos = useMemo(() => {
     if (!restaurante) return [];
-    const contacto = restaurante.contacto || {};
     return [...(restaurante.botones || [])]
       .filter((b) => b.activo !== false)
       .sort((a, b) => (a.orden ?? 999) - (b.orden ?? 999))
-      .map((b) => ({ ...b, resuelto: resolverBoton(b, restauranteId, contacto, restaurante.nombre, lang) }))
+      .map((b) => ({ ...b, resuelto: resolverBoton(b, restauranteId, restaurante.nombre, lang) }))
       .filter((b) => b.resuelto);
   }, [restaurante, restauranteId, lang]);
 
@@ -213,6 +210,10 @@ function Portada() {
 
         {marca.eslogan && (
           <p className="text-neutral-400 text-sm mb-5 max-w-xs">{marca.eslogan}</p>
+        )}
+
+        {marca.direccion && (
+          <p className="text-neutral-500 text-xs mb-5 max-w-xs">📍 {marca.direccion}</p>
         )}
 
         {pillTexto && (
