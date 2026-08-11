@@ -3,6 +3,11 @@ import { useParams } from 'react-router-dom';
 import { t } from '../i18n';
 import { subscribeRestaurante, obtenerNombreRestaurante } from '../services/restaurantesService';
 import { subscribePlatos } from '../services/platosService';
+import { subscribeCategorias } from '../services/categoriasService';
+import {
+  OTROS, listarCategorias, categoriaTieneSubcategorias, listarSubcategorias,
+  mapaEtiquetas, filtrarPlatosDeVista, buscarPlatos,
+} from '../utils/menuCategorias';
 
 // Carta pública de solo lectura — sin carrito, sin sesión anónima, sin nada del
 // flujo de pedido. Reutiliza exactamente los mismos servicios que Menu.jsx
@@ -52,7 +57,9 @@ function Carta() {
   const [estado, setEstado] = useState('cargando'); // 'cargando' | 'no-existe' | 'listo'
   const [restaurante, setRestaurante] = useState(null);
   const [platos, setPlatos] = useState([]);
+  const [categoriasMeta, setCategoriasMeta] = useState([]);
   const [categoriaActiva, setCategoriaActiva] = useState(null);
+  const [subcategoriaActiva, setSubcategoriaActiva] = useState(null);
   const [busqueda, setBusqueda] = useState('');
   const [lang, setLang] = useState(() => {
     try {
@@ -80,9 +87,11 @@ function Carta() {
     if (estado !== 'listo') return;
     const unsubRestaurante = subscribeRestaurante(restauranteId, setRestaurante);
     const unsubPlatos = subscribePlatos(restauranteId, setPlatos);
+    const unsubCategorias = subscribeCategorias(restauranteId, setCategoriasMeta);
     return () => {
       unsubRestaurante();
       unsubPlatos();
+      unsubCategorias();
     };
   }, [estado, restauranteId]);
 
@@ -108,21 +117,35 @@ function Carta() {
   }, [restaurante, lang]);
 
   const categorias = useMemo(
-    () => [...new Set(platos.map((p) => p.categoria))].sort(),
-    [platos]
+    () => listarCategorias(platos, categoriasMeta),
+    [platos, categoriasMeta]
   );
 
-  const categoriaEnMap = useMemo(() => {
-    const map = {};
-    platos.forEach((p) => {
-      if (p.categoriaEn?.trim() && !map[p.categoria]) map[p.categoria] = p.categoriaEn;
-    });
-    return map;
-  }, [platos]);
+  const categoriaEnMap = useMemo(() => mapaEtiquetas(platos, 'categoria', 'categoriaEn'), [platos]);
 
   const etiquetaCategoria = useCallback(
     (cat) => (lang === 'en' && categoriaEnMap[cat]) || cat,
     [lang, categoriaEnMap]
+  );
+
+  const categoriaTieneSubcats = useMemo(
+    () => (categoriaActiva ? categoriaTieneSubcategorias(platos, categoriaActiva) : false),
+    [platos, categoriaActiva]
+  );
+
+  const subcategorias = useMemo(
+    () => (categoriaActiva ? listarSubcategorias(platos, categoriaActiva, categoriasMeta) : []),
+    [platos, categoriaActiva, categoriasMeta]
+  );
+
+  const subcategoriaEnMap = useMemo(() => {
+    if (!categoriaActiva) return {};
+    return mapaEtiquetas(platos.filter((p) => p.categoria === categoriaActiva), 'subcategoria', 'subcategoriaEn');
+  }, [platos, categoriaActiva]);
+
+  const etiquetaSubcategoria = useCallback(
+    (sub) => (sub === OTROS ? t[lang].otros : (lang === 'en' && subcategoriaEnMap[sub]) || sub),
+    [lang, subcategoriaEnMap]
   );
 
   const nombrePlato = useCallback(
@@ -135,25 +158,26 @@ function Carta() {
   // decidir si ir o para curiosear desde redes, no para pedir ahora mismo.
   // Ocultarlos daría una carta "más limpia" pero menos honesta: alguien
   // podría pensar que el restaurante nunca tiene ese plato, cuando solo se
-  // agotó hoy.
+  // agotó hoy. Por eso ocultarAgotados=false en las dos funciones de abajo.
   const platosFiltrados = useMemo(
-    () => platos
-      .filter((p) => p.categoria === categoriaActiva)
-      .sort((a, b) => (a.orden ?? 999) - (b.orden ?? 999)),
-    [platos, categoriaActiva]
+    () => filtrarPlatosDeVista(platos, categoriaActiva, subcategoriaActiva, false),
+    [platos, categoriaActiva, subcategoriaActiva]
   );
 
-  const resultadosBusqueda = useMemo(() => {
-    const q = busqueda.trim().toLowerCase();
-    if (!q) return [];
-    return platos
-      .filter((p) =>
-        p.nombre?.toLowerCase().includes(q) ||
-        p.nombreEn?.toLowerCase().includes(q) ||
-        p.categoria?.toLowerCase().includes(q)
-      )
-      .sort((a, b) => (a.orden ?? 999) - (b.orden ?? 999));
-  }, [platos, busqueda]);
+  const resultadosBusqueda = useMemo(
+    () => buscarPlatos(platos, busqueda, false),
+    [platos, busqueda]
+  );
+
+  const volverDesdePlatos = useCallback(() => {
+    if (categoriaTieneSubcats) setSubcategoriaActiva(null);
+    else setCategoriaActiva(null);
+  }, [categoriaTieneSubcats]);
+
+  const volverACategorias = useCallback(() => {
+    setCategoriaActiva(null);
+    setSubcategoriaActiva(null);
+  }, []);
 
   const impuestosConfig = restaurante?.impuestos || {};
   const cambiarLang = (nuevoLang) => {
@@ -210,7 +234,7 @@ function Carta() {
           <input
             type="search"
             value={busqueda}
-            onChange={(e) => { setBusqueda(e.target.value); setCategoriaActiva(null); }}
+            onChange={(e) => { setBusqueda(e.target.value); volverACategorias(); }}
             placeholder={t[lang].buscarPlaceholder}
             className="w-full bg-neutral-900 border border-neutral-700 px-4 py-3 text-white placeholder-neutral-500 text-base focus:outline-none focus:border-amber-400"
           />
@@ -243,23 +267,59 @@ function Carta() {
           )}
         </div>
       ) : !categoriaActiva ? (
-        <div className="max-w-lg mx-auto px-4 py-4 space-y-3">
+        <div className="max-w-lg mx-auto px-4 py-4 grid grid-cols-1 gap-3">
           {categorias.map((cat) => (
-            <button key={cat} onClick={() => setCategoriaActiva(cat)}
-              className="w-full border border-neutral-700 py-4 text-left px-6 text-lg font-semibold hover:border-amber-400 hover:text-amber-400 transition-colors capitalize">
-              {etiquetaCategoria(cat)}
+            <button key={cat.nombre}
+              onClick={() => { setCategoriaActiva(cat.nombre); setSubcategoriaActiva(null); }}
+              className="relative w-full h-28 border border-neutral-700 overflow-hidden text-center hover:border-amber-400 transition-colors">
+              {cat.imagenUrl && (
+                <img src={cat.imagenUrl} alt="" loading="lazy"
+                  className="absolute inset-0 w-full h-full object-cover" />
+              )}
+              <div className="absolute inset-0 bg-black/50" />
+              <span className="relative z-10 flex items-center justify-center h-full text-lg font-semibold capitalize px-6 hover:text-amber-400 transition-colors">
+                {etiquetaCategoria(cat.nombre)}
+              </span>
             </button>
           ))}
+        </div>
+      ) : categoriaTieneSubcats && !subcategoriaActiva ? (
+        <div className="max-w-lg mx-auto px-4 py-6">
+          <div className="flex items-center gap-3 mb-6">
+            <button onClick={volverACategorias} className="text-amber-400 text-sm hover:underline">
+              ← {t[lang].volver}
+            </button>
+            <h2 className="text-amber-400 text-xs tracking-widest uppercase">
+              {etiquetaCategoria(categoriaActiva)}
+            </h2>
+          </div>
+          <div className="grid grid-cols-1 gap-3">
+            {subcategorias.map((sub) => (
+              <button key={sub.nombre === OTROS ? '__otros__' : sub.nombre}
+                onClick={() => setSubcategoriaActiva(sub.nombre)}
+                className="relative w-full h-28 border border-neutral-700 overflow-hidden text-center hover:border-amber-400 transition-colors">
+                {sub.imagenUrl && (
+                  <img src={sub.imagenUrl} alt="" loading="lazy"
+                    className="absolute inset-0 w-full h-full object-cover" />
+                )}
+                <div className="absolute inset-0 bg-black/50" />
+                <span className="relative z-10 flex items-center justify-center h-full text-lg font-semibold capitalize px-6 hover:text-amber-400 transition-colors">
+                  {etiquetaSubcategoria(sub.nombre)}
+                </span>
+              </button>
+            ))}
+          </div>
         </div>
       ) : (
         <div className="max-w-lg mx-auto px-4 py-6">
           <div className="flex items-center gap-3 mb-6">
-            <button onClick={() => setCategoriaActiva(null)}
+            <button onClick={volverDesdePlatos}
               className="text-amber-400 text-sm hover:underline">
               ← {t[lang].volver}
             </button>
             <h2 className="text-amber-400 text-xs tracking-widest uppercase">
               {t[lang].menuDe} {etiquetaCategoria(categoriaActiva)}
+              {subcategoriaActiva ? ` — ${etiquetaSubcategoria(subcategoriaActiva)}` : ''}
             </h2>
           </div>
           <div className="space-y-4">

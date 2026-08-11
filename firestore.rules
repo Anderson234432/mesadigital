@@ -102,6 +102,17 @@ service cloud.firestore {
         allow write: if esAdmin(restauranteId);
       }
 
+      // ── Categorías (metadatos de presentación) ─────────────────────────────
+      // Qué categorías/subcategorías EXISTEN se sigue derivando de `platos`
+      // (ver src/utils/menuCategorias.js) — esto solo guarda imagen/orden,
+      // opcional, mismo patrón de acceso que platos. El id del documento es
+      // un slug determinista (ver src/utils/slug.js), nunca lo elige el
+      // cliente libremente ni afecta qué se muestra si no existe.
+      match /categorias/{categoriaId} {
+        allow read: if true;
+        allow write: if esAdmin(restauranteId);
+      }
+
       // ── Pedidos ─────────────────────────────────────────────────────────────
 
       match /pedidos/{pedidoId} {

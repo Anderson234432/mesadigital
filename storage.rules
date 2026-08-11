@@ -55,5 +55,17 @@ service firebase.storage {
           request.auth.uid in firestore.get(/databases/(default)/documents/restaurantes/$(restauranteId)).data.get('adminUids', [])
         );
     }
+
+    // ── Categorías (fondo de tarjeta de categoría/subcategoría) — misma
+    // regla que platos/ y marca/, solo cambia la ruta.
+    match /restaurantes/{restauranteId}/categorias/{allPaths=**} {
+      allow read: if true;
+      allow write: if request.auth != null
+        && request.auth.token.firebase.sign_in_provider != 'anonymous'
+        && (
+          esMaestro() ||
+          request.auth.uid in firestore.get(/databases/(default)/documents/restaurantes/$(restauranteId)).data.get('adminUids', [])
+        );
+    }
   }
 }

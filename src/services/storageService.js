@@ -19,6 +19,18 @@ export async function subirImagenMarca(imagen, restauranteId, tipo) {
   return storageRepo.subirArchivo(`restaurantes/${restauranteId}/marca/${tipo}_${Date.now()}_${imagen.name}`, comprimida);
 }
 
+// Fondo de tarjeta de categoría/subcategoría: se ve en una grilla de tiles
+// (no a pantalla completa como marca.portadaUrl), y un menú puede tener
+// varias — comprime más agresivo que platos/marca para no sumar peso
+// innecesario a lo primero que carga un cliente con datos móviles.
+const OPCIONES_COMPRESION_CATEGORIA = { maxSizeMB: 0.15, maxWidthOrHeight: 640, useWebWorker: true };
+
+export async function subirImagenCategoria(imagen, restauranteId, slug) {
+  if (imagen.size > 3 * 1024 * 1024) throw new Error('La imagen supera los 3MB.');
+  const comprimida = await imageCompression(imagen, OPCIONES_COMPRESION_CATEGORIA);
+  return storageRepo.subirArchivo(`restaurantes/${restauranteId}/categorias/${slug}_${Date.now()}_${imagen.name}`, comprimida);
+}
+
 export async function eliminarImagenPorUrl(url) {
   const path = storageRepo.extraerPathDeUrl(url);
   if (!path) return;

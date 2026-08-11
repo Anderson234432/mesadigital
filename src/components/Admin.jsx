@@ -11,6 +11,12 @@ import { rangoDiaOperativo, fechaOperativaHoy, parsearHoraCierre } from '../util
 import { derivarHoraCierreOperativo } from '../utils/horarioRestaurante';
 import { subirImagenMarca } from '../services/storageService';
 import { destinoBotonValido, normalizarDestinoBoton, migrarDestinosDesdeContacto } from '../utils/contacto';
+import {
+  subscribeCategorias, guardarMeta as guardarMetaCategoria,
+  subirImagen as subirImagenCategoriaMeta, quitarImagen as quitarImagenCategoriaMeta,
+} from '../services/categoriasService';
+import { listarCategorias, listarSubcategorias } from '../utils/menuCategorias';
+import { slugify, slugSubcategoria } from '../utils/slug';
 
 const DIAS_SEMANA = ['lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado', 'domingo'];
 const DIAS_SEMANA_LABEL = {
@@ -62,6 +68,8 @@ export default function Admin() {
   const [acceso, setAcceso] = useState(null);
   const [nombreRestaurante, setNombreRestaurante] = useState('');
   const [platos, setPlatos] = useState([]);
+  const [categoriasMeta, setCategoriasMeta] = useState([]);
+  const [categoriaFileKeys, setCategoriaFileKeys] = useState({});
   const [pedidos, setPedidos] = useState([]);
   const [ventasDiarias, setVentasDiarias] = useState([]);
   const [fechaFiltro, setFechaFiltro] = useState(localDateStr);
@@ -71,6 +79,7 @@ export default function Admin() {
   const [busqueda, setBusqueda] = useState('');
   const [form, setForm] = useState({
     nombre: '', nombreEn: '', precio: '', categoria: '', categoriaEn: '',
+    subcategoria: '', subcategoriaEn: '',
     descripcion: '', imagenUrl: '', disponible: true, tiempoMin: '', orden: '',
   });
   const [editandoId, setEditandoId] = useState(null);
@@ -101,6 +110,7 @@ export default function Admin() {
 
   const formVacio = {
     nombre: '', nombreEn: '', precio: '', categoria: '', categoriaEn: '',
+    subcategoria: '', subcategoriaEn: '',
     descripcion: '', imagenUrl: '', disponible: true, tiempoMin: '', orden: '',
   };
 
@@ -254,9 +264,32 @@ export default function Admin() {
     if (!busqueda.trim()) return platosOrdenados;
     const q = busqueda.toLowerCase();
     return platosOrdenados.filter(
-      (p) => p.nombre.toLowerCase().includes(q) || p.categoria.toLowerCase().includes(q)
+      (p) => p.nombre.toLowerCase().includes(q) || p.categoria.toLowerCase().includes(q) ||
+        (p.subcategoria || '').toLowerCase().includes(q)
     );
   }, [platosOrdenados, busqueda]);
+
+  // ─── Categorías/subcategorías (para autocompletar el form y la sección
+  // de gestión más abajo) — misma fuente que Menu.jsx/Carta.jsx, así el
+  // orden e imágenes configurados aquí coinciden exactamente con lo que
+  // ve el cliente.
+  const categoriasExistentes = useMemo(
+    () => [...new Set(platos.map((p) => p.categoria).filter(Boolean))],
+    [platos]
+  );
+
+  const subcategoriasExistentesDeCategoria = useMemo(() => {
+    if (!form.categoria?.trim()) return [];
+    const q = form.categoria.trim().toLowerCase();
+    return [...new Set(
+      platos.filter((p) => p.categoria?.toLowerCase() === q).map((p) => p.subcategoria).filter(Boolean)
+    )];
+  }, [platos, form.categoria]);
+
+  const categoriasAdmin = useMemo(
+    () => listarCategorias(platos, categoriasMeta),
+    [platos, categoriasMeta]
+  );
 
   // ─── Helpers UI ───────────────────────────────────────────
   function mostrarMensaje(texto, tipo = 'ok') {
@@ -425,7 +458,12 @@ export default function Admin() {
         if (montadoRef.current) setAcceso(false);
       });
 
-    return subscribePlatos(restauranteId, setPlatos);
+    const unsubPlatos = subscribePlatos(restauranteId, setPlatos);
+    const unsubCategorias = subscribeCategorias(restauranteId, setCategoriasMeta);
+    return () => {
+      unsubPlatos();
+      unsubCategorias();
+    };
   }, [restauranteId]);
 
   // ─── Effect 2: pedidos del período ───────────────────────
@@ -454,6 +492,16 @@ export default function Admin() {
 
   const handleChange = (e) => setForm({ ...form, [e.target.name]: e.target.value });
 
+  // Evita crear un grupo nuevo por una diferencia de mayúsculas/espacios: si
+  // el dueño escribe "cervezas" y ya existe "Cervezas", se guarda con la
+  // capitalización ya existente en vez de crear un segundo grupo.
+  function normalizarContraExistentes(valor, existentes) {
+    const v = (valor || '').trim();
+    if (!v) return v;
+    const coincidencia = existentes.find((e) => e.toLowerCase() === v.toLowerCase());
+    return coincidencia || v;
+  }
+
   const guardar = async () => {
     if (!form.nombre || !form.precio || !form.categoria) {
       mostrarMensaje('Nombre, precio y categoría son obligatorios.', 'error');
@@ -461,7 +509,12 @@ export default function Admin() {
     }
     setGuardando(true);
     try {
-      await guardarPlato(restauranteId, form, imagen, editandoId);
+      const formNormalizado = {
+        ...form,
+        categoria: normalizarContraExistentes(form.categoria, categoriasExistentes),
+        subcategoria: normalizarContraExistentes(form.subcategoria, subcategoriasExistentesDeCategoria),
+      };
+      await guardarPlato(restauranteId, formNormalizado, imagen, editandoId);
       if (!montadoRef.current) return;
       setEditandoId(null);
       setForm(formVacio);
@@ -482,7 +535,10 @@ export default function Admin() {
   };
 
   const editar = (plato) => {
-    setForm({ ...plato, orden: plato.orden ?? '' });
+    // subcategoria/subcategoriaEn no existen en platos guardados antes de
+    // esta función — sin el fallback, el input pasaría de no controlado
+    // (undefined) a controlado apenas el dueño escribiera algo.
+    setForm({ ...plato, subcategoria: plato.subcategoria || '', subcategoriaEn: plato.subcategoriaEn || '', orden: plato.orden ?? '' });
     setEditandoId(plato.id);
   };
 
@@ -494,6 +550,89 @@ export default function Admin() {
     } catch (e) {
       console.error('Error eliminando:', e);
       if (montadoRef.current) mostrarMensaje('Error al eliminar el plato.', 'error');
+    }
+  };
+
+  // ── Categorías (imagen + orden de presentación) ─────────────────────────
+  const handleSubirImagenCategoria = async (slug, nombre, imagen) => {
+    if (!imagen) return;
+    try {
+      await subirImagenCategoriaMeta(restauranteId, slug, imagen, { nombre, tipo: 'categoria' });
+      if (montadoRef.current) {
+        setCategoriaFileKeys((k) => ({ ...k, [slug]: (k[slug] || 0) + 1 }));
+        mostrarMensaje('Imagen de categoría guardada.', 'ok');
+      }
+    } catch (e) {
+      if (montadoRef.current) {
+        mostrarMensaje(e.message === 'La imagen supera los 3MB.' ? e.message : 'Error al subir la imagen.', 'error');
+      }
+    }
+  };
+
+  const handleQuitarImagenCategoria = async (slug, nombre, imagenUrlActual) => {
+    try {
+      await quitarImagenCategoriaMeta(restauranteId, slug, imagenUrlActual, { nombre, tipo: 'categoria' });
+      if (montadoRef.current) mostrarMensaje('Imagen quitada.', 'ok');
+    } catch {
+      if (montadoRef.current) mostrarMensaje('Error al quitar la imagen.', 'error');
+    }
+  };
+
+  const handleSubirImagenSubcategoria = async (slug, categoria, nombre, imagen) => {
+    if (!imagen) return;
+    try {
+      await subirImagenCategoriaMeta(restauranteId, slug, imagen, { nombre, tipo: 'subcategoria', categoriaSlug: slugify(categoria) });
+      if (montadoRef.current) {
+        setCategoriaFileKeys((k) => ({ ...k, [slug]: (k[slug] || 0) + 1 }));
+        mostrarMensaje('Imagen de subcategoría guardada.', 'ok');
+      }
+    } catch (e) {
+      if (montadoRef.current) {
+        mostrarMensaje(e.message === 'La imagen supera los 3MB.' ? e.message : 'Error al subir la imagen.', 'error');
+      }
+    }
+  };
+
+  const handleQuitarImagenSubcategoria = async (slug, categoria, nombre, imagenUrlActual) => {
+    try {
+      await quitarImagenCategoriaMeta(restauranteId, slug, imagenUrlActual, { nombre, tipo: 'subcategoria', categoriaSlug: slugify(categoria) });
+      if (montadoRef.current) mostrarMensaje('Imagen quitada.', 'ok');
+    } catch {
+      if (montadoRef.current) mostrarMensaje('Error al quitar la imagen.', 'error');
+    }
+  };
+
+  // Reordenar reasigna `orden` secuencial (0,1,2…) a TODAS las categorías/
+  // subcategorías de la lista, no solo a las dos movidas — así el orden
+  // queda determinista para todas después del primer reordenamiento,
+  // igual que ya hace handleMoverBoton con los botones de la portada.
+  const moverCategoria = async (lista, index, direccion) => {
+    const nuevoIdx = index + direccion;
+    if (nuevoIdx < 0 || nuevoIdx >= lista.length) return;
+    const reordenadas = [...lista];
+    [reordenadas[index], reordenadas[nuevoIdx]] = [reordenadas[nuevoIdx], reordenadas[index]];
+    try {
+      await Promise.all(reordenadas.map((cat, i) =>
+        guardarMetaCategoria(restauranteId, slugify(cat.nombre), { nombre: cat.nombre, tipo: 'categoria', orden: i })
+      ));
+    } catch {
+      if (montadoRef.current) mostrarMensaje('Error al reordenar categorías.', 'error');
+    }
+  };
+
+  const moverSubcategoria = async (categoria, lista, index, direccion) => {
+    const nuevoIdx = index + direccion;
+    if (nuevoIdx < 0 || nuevoIdx >= lista.length) return;
+    const reordenadas = [...lista];
+    [reordenadas[index], reordenadas[nuevoIdx]] = [reordenadas[nuevoIdx], reordenadas[index]];
+    try {
+      await Promise.all(reordenadas.map((sub, i) =>
+        guardarMetaCategoria(restauranteId, slugSubcategoria(categoria, sub.nombre), {
+          nombre: sub.nombre, tipo: 'subcategoria', categoriaSlug: slugify(categoria), orden: i,
+        })
+      ));
+    } catch {
+      if (montadoRef.current) mostrarMensaje('Error al reordenar subcategorías.', 'error');
     }
   };
 
@@ -748,12 +887,30 @@ export default function Admin() {
           </div>
           <input name="precio" placeholder="Precio *" type="number" value={form.precio} onChange={handleChange}
             className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-base" />
-          <input name="categoria" placeholder="Categoría *" value={form.categoria} onChange={handleChange}
+          <input name="categoria" list="categorias-existentes" placeholder="Categoría *" value={form.categoria} onChange={handleChange}
             className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-base" />
+          <datalist id="categorias-existentes">
+            {categoriasExistentes.map((c) => <option key={c} value={c} />)}
+          </datalist>
           <div>
             <input name="categoriaEn" placeholder="Categoría en inglés (opcional)" value={form.categoriaEn} onChange={handleChange}
               className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-base" />
             <p className="text-neutral-600 text-xs mt-1">Si lo dejas vacío, se mostrará la categoría en español.</p>
+          </div>
+          <div>
+            <input name="subcategoria" list="subcategorias-existentes" placeholder="Subcategoría (opcional)" value={form.subcategoria} onChange={handleChange}
+              className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-base" />
+            <datalist id="subcategorias-existentes">
+              {subcategoriasExistentesDeCategoria.map((s) => <option key={s} value={s} />)}
+            </datalist>
+            <p className="text-neutral-600 text-xs mt-1">
+              Úsala para agrupar dentro de una categoría. Ejemplo: en Bebidas, puedes tener Cervezas, Cócteles y Tragos.
+            </p>
+          </div>
+          <div>
+            <input name="subcategoriaEn" placeholder="Subcategoría en inglés (opcional)" value={form.subcategoriaEn} onChange={handleChange}
+              className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-base" />
+            <p className="text-neutral-600 text-xs mt-1">Si lo dejas vacío, se mostrará la subcategoría en español.</p>
           </div>
           <input name="orden" placeholder="Orden de aparición en menú (1, 2, 3…)" type="number" value={form.orden} onChange={handleChange}
             className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-base" />
@@ -810,7 +967,9 @@ export default function Admin() {
             <div key={p.id} className="flex justify-between items-center border-b border-neutral-800 pb-3">
               <div>
                 <p className="font-semibold">{p.nombre}</p>
-                <p className="text-neutral-400 text-sm">{p.categoria} — RD${p.precio}</p>
+                <p className="text-neutral-400 text-sm">
+                  {p.categoria}{p.subcategoria ? ` › ${p.subcategoria}` : ''} — RD${p.precio}
+                </p>
                 {p.orden !== undefined && p.orden !== '' &&
                   <p className="text-neutral-600 text-xs">Orden: {p.orden}</p>}
               </div>
@@ -848,6 +1007,89 @@ export default function Admin() {
           ))}
           {platosFiltrados.length === 0 && busqueda && (
             <p className="text-neutral-500 text-sm">Sin resultados para "{busqueda}".</p>
+          )}
+        </div>
+
+        {/* ── Categorías ── */}
+        <div className="border border-neutral-800 p-6 mt-8">
+          <h2 className="text-amber-400 text-xs tracking-widest uppercase mb-1">Categorías</h2>
+          <p className="text-neutral-500 text-xs mb-4">
+            Ponle una imagen de fondo a cada categoría (y a sus subcategorías, si las usas) y ordénalas como
+            quieras que aparezcan en el menú. Si no tocas nada aquí, todo sigue funcionando igual que hoy.
+          </p>
+          {categoriasAdmin.length === 0 ? (
+            <p className="text-neutral-600 text-xs">Agrega platos primero — las categorías aparecen aquí solas.</p>
+          ) : (
+            <div className="space-y-5">
+              {categoriasAdmin.map((cat, i) => {
+                const slugCat = slugify(cat.nombre);
+                const subcats = listarSubcategorias(platos, cat.nombre, categoriasMeta)
+                  .filter((s) => typeof s.nombre === 'string');
+                return (
+                  <div key={cat.nombre} className="border border-neutral-800 p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <p className="font-semibold capitalize">{cat.nombre}</p>
+                      <div className="flex gap-1">
+                        <button onClick={() => moverCategoria(categoriasAdmin, i, -1)} disabled={i === 0}
+                          className="text-xs border border-neutral-700 text-neutral-400 px-2 py-1 hover:border-amber-400 disabled:opacity-30 min-h-[32px]">▲</button>
+                        <button onClick={() => moverCategoria(categoriasAdmin, i, 1)} disabled={i === categoriasAdmin.length - 1}
+                          className="text-xs border border-neutral-700 text-neutral-400 px-2 py-1 hover:border-amber-400 disabled:opacity-30 min-h-[32px]">▼</button>
+                      </div>
+                    </div>
+                    {cat.imagenUrl && (
+                      <img src={cat.imagenUrl} alt="" className="w-full h-24 object-cover mb-2 border border-neutral-700" />
+                    )}
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <input key={categoriaFileKeys[slugCat] || 0} type="file" accept="image/*"
+                        onChange={(e) => handleSubirImagenCategoria(slugCat, cat.nombre, e.target.files[0])}
+                        className="flex-1 min-w-[180px] bg-neutral-900 border border-neutral-700 px-3 py-2 text-neutral-400 focus:outline-none focus:border-amber-400 text-sm" />
+                      {cat.imagenUrl && (
+                        <button onClick={() => handleQuitarImagenCategoria(slugCat, cat.nombre, cat.imagenUrl)}
+                          className="text-xs border border-neutral-600 text-neutral-400 px-3 py-1 hover:border-red-400 hover:text-red-400 transition-colors min-h-[32px]">
+                          Quitar
+                        </button>
+                      )}
+                    </div>
+
+                    {subcats.length > 0 && (
+                      <div className="mt-4 pl-4 border-l border-neutral-800 space-y-3">
+                        <p className="text-neutral-500 text-xs tracking-widest uppercase">Subcategorías</p>
+                        {subcats.map((sub, j) => {
+                          const slugSub = slugSubcategoria(cat.nombre, sub.nombre);
+                          return (
+                            <div key={sub.nombre} className="border border-neutral-800 p-3">
+                              <div className="flex items-center justify-between mb-2">
+                                <p className="text-sm">{sub.nombre}</p>
+                                <div className="flex gap-1">
+                                  <button onClick={() => moverSubcategoria(cat.nombre, subcats, j, -1)} disabled={j === 0}
+                                    className="text-xs border border-neutral-700 text-neutral-400 px-2 py-1 hover:border-amber-400 disabled:opacity-30 min-h-[32px]">▲</button>
+                                  <button onClick={() => moverSubcategoria(cat.nombre, subcats, j, 1)} disabled={j === subcats.length - 1}
+                                    className="text-xs border border-neutral-700 text-neutral-400 px-2 py-1 hover:border-amber-400 disabled:opacity-30 min-h-[32px]">▼</button>
+                                </div>
+                              </div>
+                              {sub.imagenUrl && (
+                                <img src={sub.imagenUrl} alt="" className="w-full h-20 object-cover mb-2 border border-neutral-700" />
+                              )}
+                              <div className="flex items-center gap-3 flex-wrap">
+                                <input key={categoriaFileKeys[slugSub] || 0} type="file" accept="image/*"
+                                  onChange={(e) => handleSubirImagenSubcategoria(slugSub, cat.nombre, sub.nombre, e.target.files[0])}
+                                  className="flex-1 min-w-[180px] bg-neutral-900 border border-neutral-700 px-3 py-2 text-neutral-400 focus:outline-none focus:border-amber-400 text-sm" />
+                                {sub.imagenUrl && (
+                                  <button onClick={() => handleQuitarImagenSubcategoria(slugSub, cat.nombre, sub.nombre, sub.imagenUrl)}
+                                    className="text-xs border border-neutral-600 text-neutral-400 px-3 py-1 hover:border-red-400 hover:text-red-400 transition-colors min-h-[32px]">
+                                    Quitar
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           )}
         </div>
 

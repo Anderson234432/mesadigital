@@ -20,6 +20,8 @@ export async function guardarPlato(restauranteId, form, imagen, editandoId) {
     precio: Number(form.precio),
     categoria: form.categoria,
     categoriaEn: form.categoriaEn || '',
+    subcategoria: form.subcategoria || '',
+    subcategoriaEn: form.subcategoriaEn || '',
     descripcion: form.descripcion || '',
     imagenUrl,
     disponible: form.disponible !== false,
