@@ -1,13 +1,14 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useParams } from 'react-router-dom';
 import {
-  verificarAccesoAdmin, guardarTiempos, guardarImpuestos, guardarHoraCierreOperativo,
+  verificarAccesoAdmin, guardarTiempos, guardarImpuestos,
   guardarMarca, guardarHorarios, guardarContacto, guardarBotones,
 } from '../services/restaurantesService';
 import { subscribePlatos, guardarPlato, eliminarPlato, toggleDisponible } from '../services/platosService';
 import { subscribePedidosDia, subscribePedidosPeriodo, subscribeVentasDiarias, actualizarEstadoMesa } from '../services/pedidosService';
 import { logout, getUid } from '../services/authService';
 import { rangoDiaOperativo, fechaOperativaHoy, parsearHoraCierre } from '../utils/fechaOperativa';
+import { derivarHoraCierreOperativo } from '../utils/horarioRestaurante';
 import { subirImagenMarca } from '../services/storageService';
 
 const DIAS_SEMANA = ['lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado', 'domingo'];
@@ -27,15 +28,6 @@ const TIPOS_BOTON = [
 
 function nuevoBotonId() {
   return typeof crypto?.randomUUID === 'function' ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
-
-// Rango permitido para horaCierreOperativo — más allá de las 6 AM no tiene
-// sentido operativo (sería un error de captura), ver Admin > configuración.
-const HORA_CIERRE_MAX = 6 * 60;
-const HORA_CIERRE_REGEX = /^([0-1]\d|2[0-3]):([0-5]\d)$/;
-
-function horaCierreValida(valor) {
-  return HORA_CIERRE_REGEX.test(valor || '') && parsearHoraCierre(valor) <= HORA_CIERRE_MAX;
 }
 
 // "4:00 AM" a partir de minutos desde medianoche — formato fijo, no depende
@@ -78,8 +70,7 @@ export default function Admin() {
   const [fileKey, setFileKey] = useState(0);
   const [tiemposForm, setTiemposForm] = useState({});
   const [impuestosForm, setImpuestosForm] = useState({});
-  const [horaCierreOperativo, setHoraCierreOperativo] = useState('00:00'); // valor guardado, usado para todos los cálculos
-  const [horaCierreForm, setHoraCierreForm] = useState('00:00'); // valor del campo de configuración (puede diferir del guardado hasta que se guarda)
+  const [horaCierreOperativo, setHoraCierreOperativo] = useState('00:00'); // valor guardado, usado para todos los cálculos — derivado de horariosForm al guardar
   const [horaCierreConfiguradaEn, setHoraCierreConfiguradaEn] = useState(null);
   const [marcaForm, setMarcaForm] = useState({ logoUrl: '', portadaUrl: '', eslogan: '' });
   const [logoFile, setLogoFile] = useState(null);
@@ -108,7 +99,6 @@ export default function Admin() {
   };
 
   // Mismo patrón que urlInvitacion en PanelMaestro.jsx.
-  const urlCarta = `${import.meta.env.VITE_BASE_URL || window.location.origin}/restaurante/${restauranteId}/carta`;
   const urlPortada = `${import.meta.env.VITE_BASE_URL || window.location.origin}/restaurante/${restauranteId}`;
 
   // ─── Valores derivados ────────────────────────────────────
@@ -380,7 +370,6 @@ export default function Admin() {
           setTiemposForm(tiempos);
           setImpuestosForm(impuestos);
           setHoraCierreOperativo(hc);
-          setHoraCierreForm(hc);
           setMarcaForm({ logoUrl: marca.logoUrl || '', portadaUrl: marca.portadaUrl || '', eslogan: marca.eslogan || '' });
           // Los 7 días siempre presentes en el form, aunque el restaurante
           // todavía no haya configurado ninguno — así cada campo tiene un
@@ -508,22 +497,6 @@ export default function Admin() {
     }
   };
 
-  const handleGuardarHoraCierre = async () => {
-    if (!horaCierreValida(horaCierreForm)) {
-      mostrarMensaje('La hora de cierre debe estar entre 00:00 y 06:00.', 'error');
-      return;
-    }
-    try {
-      await guardarHoraCierreOperativo(restauranteId, horaCierreForm);
-      if (!montadoRef.current) return;
-      setHoraCierreOperativo(horaCierreForm);
-      setHoraCierreConfiguradaEn(new Date()); // reflejo optimista de lo que la Cloud Function acaba de guardar
-      mostrarMensaje('Hora de cierre guardada.', 'ok');
-    } catch {
-      if (montadoRef.current) mostrarMensaje('Error al guardar la hora de cierre.', 'error');
-    }
-  };
-
   // ── Marca (logo, portada, eslogan) ──────────────────────────────────────
   const handleGuardarMarca = async () => {
     setSubiendoMarca(true);
@@ -579,8 +552,19 @@ export default function Admin() {
     }
     setGuardandoHorarios(true);
     try {
-      await guardarHorarios(restauranteId, horariosForm);
-      if (montadoRef.current) mostrarMensaje('Horarios guardados.', 'ok');
+      // horaCierreOperativo va derivado de horariosForm — un solo write
+      // atómico, así nunca quedan desincronizados (ver
+      // derivarHoraCierreOperativo en utils/horarioRestaurante.js). El aviso
+      // de discontinuidad (horaCierreConfiguradaEn) solo se reinicia cuando
+      // el valor derivado REALMENTE cambia respecto al guardado.
+      const horaCierreDerivado = derivarHoraCierreOperativo(horariosForm);
+      const cambioDeCierre = horaCierreDerivado !== horaCierreOperativo;
+      await guardarHorarios(restauranteId, horariosForm, horaCierreDerivado, cambioDeCierre);
+      if (montadoRef.current) {
+        setHoraCierreOperativo(horaCierreDerivado);
+        if (cambioDeCierre) setHoraCierreConfiguradaEn(new Date()); // reflejo optimista de lo que se acaba de guardar
+        mostrarMensaje('Horarios guardados.', 'ok');
+      }
     } catch {
       if (montadoRef.current) mostrarMensaje('Error al guardar los horarios.', 'error');
     } finally {
@@ -651,15 +635,6 @@ export default function Admin() {
     }
   };
 
-  const copiarUrlCarta = async () => {
-    try {
-      await navigator.clipboard.writeText(urlCarta);
-      if (montadoRef.current) mostrarMensaje('Enlace de la carta copiado.', 'ok');
-    } catch {
-      if (montadoRef.current) mostrarMensaje(urlCarta, 'ok');
-    }
-  };
-
   const copiarUrlPortada = async () => {
     try {
       await navigator.clipboard.writeText(urlPortada);
@@ -720,16 +695,6 @@ export default function Admin() {
         <button onClick={cerrarSesion}
           className="text-xs border border-neutral-600 text-neutral-400 px-3 py-1 hover:border-red-400 hover:text-red-400 transition-colors">
           Cerrar sesión
-        </button>
-      </div>
-
-      {/* Carta pública — para compartir en redes */}
-      <div className="bg-neutral-900 border-b border-neutral-800 px-6 py-3 flex flex-wrap items-center gap-3">
-        <span className="text-neutral-500 text-xs shrink-0">Tu carta pública (para Instagram, WhatsApp, etc.):</span>
-        <span className="text-neutral-400 text-xs font-mono truncate flex-1 min-w-0">{urlCarta}</span>
-        <button onClick={copiarUrlCarta}
-          className="text-xs border border-amber-400 text-amber-400 px-3 py-1 hover:bg-amber-400 hover:text-black transition-colors shrink-0 min-h-[32px]">
-          Copiar enlace
         </button>
       </div>
 
@@ -876,30 +841,6 @@ export default function Admin() {
           </button>
         </div>
 
-        {/* ── Día operativo ── */}
-        <div className="border border-neutral-800 p-6 mt-8">
-          <h2 className="text-amber-400 text-xs tracking-widest uppercase mb-1">Hora de cierre del día operativo</h2>
-          <p className="text-neutral-500 text-xs mb-4">
-            Si tu restaurante sirve hasta la madrugada, pon aquí la hora en que cierras. Todo lo que se venda antes
-            de esa hora contará como el día anterior. Ejemplo: si cierras a las 3:00 AM, una venta del lunes a la
-            1:00 AM aparecerá en el reporte del domingo.
-          </p>
-          <div className="flex items-center gap-3">
-            <label className="text-neutral-400 text-sm w-32">Hora de cierre</label>
-            <input type="time" step="60" min="00:00" max="06:00" value={horaCierreForm}
-              onChange={(e) => setHoraCierreForm(e.target.value)}
-              className="w-32 bg-neutral-900 border border-neutral-700 px-3 py-2 text-white focus:outline-none focus:border-amber-400 text-base" />
-          </div>
-          <p className="text-neutral-600 text-xs mt-3">
-            Con esta configuración, tu día del lunes va desde el lunes {formatHoraAmPm(parsearHoraCierre(horaCierreForm))} hasta
-            el martes {formatHoraAmPm(parsearHoraCierre(horaCierreForm))}.
-          </p>
-          <button onClick={handleGuardarHoraCierre}
-            className="mt-4 bg-amber-400 text-black px-6 py-2 font-bold hover:bg-amber-300 transition-colors min-h-[44px]">
-            Guardar hora de cierre
-          </button>
-        </div>
-
         {/* ── Impuestos ── */}
         <div className="border border-neutral-800 p-6 mt-8">
           <h2 className="text-amber-400 text-xs tracking-widest uppercase mb-1">Impuestos</h2>
@@ -954,9 +895,9 @@ export default function Admin() {
 
         {/* ── Portada pública ── */}
         <div className="border border-neutral-800 p-6 mt-8">
-          <h2 className="text-amber-400 text-xs tracking-widest uppercase mb-1">Portada pública</h2>
+          <h2 className="text-amber-400 text-xs tracking-widest uppercase mb-1">Tu enlace público</h2>
           <p className="text-neutral-500 text-xs mb-4">
-            La página que ve alguien que llega desde Instagram, Google o un link compartido.
+            Compártelo en Instagram, WhatsApp o Google. Desde ahí tus clientes ven tu menú, tu horario y cómo llegar.
           </p>
           <div className="flex flex-wrap items-center gap-3 mb-2">
             <span className="text-neutral-400 text-xs font-mono truncate flex-1 min-w-0">{urlPortada}</span>
@@ -965,6 +906,10 @@ export default function Admin() {
               Copiar enlace
             </button>
           </div>
+          <a href={urlPortada} target="_blank" rel="noopener noreferrer"
+            className="text-amber-400 text-xs hover:underline">
+            Ver cómo se ve
+          </a>
 
           {/* Marca */}
           <div className="border-t border-neutral-800 pt-5 mt-5">
@@ -1007,6 +952,13 @@ export default function Admin() {
             <p className="text-neutral-600 text-xs mb-3">
               Si cierras de madrugada, pon la hora de cierre del día siguiente (ej. abre 5:00 PM, cierra 2:00 AM).
               Deja un día sin horas para no restringir pedidos ese día.
+            </p>
+            <p className="text-neutral-600 text-xs mb-1">
+              Si cierras después de medianoche, las ventas de la madrugada se contarán en el día anterior. Ejemplo:
+              si cierras a las 2:00 AM, una venta del lunes a la 1:00 AM aparecerá en tu reporte del domingo.
+            </p>
+            <p className="text-neutral-500 text-xs mb-3">
+              Tu día operativo termina a las {formatHoraAmPm(parsearHoraCierre(derivarHoraCierreOperativo(horariosForm)))}.
             </p>
             <div className="space-y-3">
               {DIAS_SEMANA.map((dia) => (

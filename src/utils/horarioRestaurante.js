@@ -153,3 +153,33 @@ export function calcularEstadoApertura(horarios, ahoraMs) {
 
   return { abierto: false, categoria: 'sinProximaApertura' };
 }
+
+// Deriva horaCierreOperativo (functions/lib/fechaOperativa.js) a partir de
+// `horarios` — evita pedirle al dueño el mismo dato dos veces. Solo del lado
+// del cliente: nada en el servidor necesita derivar esto, horaCierreOperativo
+// ya es lo que crearPedido/Admin.jsx leen directamente (ver Admin.jsx,
+// handleGuardarHorarios).
+//
+// Lógica: de los días con horario configurado (no cerrados), solo importan
+// los que cruzan medianoche (cierra <= abre). Sin ninguno, el cierre
+// operativo es "00:00" (día de calendario normal). Con al menos uno, se
+// toma el cierre MÁS TARDÍO entre esos días — es la única opción segura: si
+// se tomara cualquier otro, una venta de un día con cierre más tardío que
+// el elegido caería en el día operativo equivocado.
+export function derivarHoraCierreOperativo(horarios) {
+  if (!horarios || typeof horarios !== 'object') return '00:00';
+  let cierreMasTardio = null; // minutos desde medianoche
+  DIAS.forEach((dia) => {
+    const h = horarios[dia];
+    if (!h || h.cerrado) return;
+    const abre = parsearHora(h.abre);
+    const cierra = parsearHora(h.cierra);
+    if (abre === null || cierra === null) return;
+    if (cierra > abre) return; // no cruza medianoche, no participa en el cálculo
+    if (cierreMasTardio === null || cierra > cierreMasTardio) cierreMasTardio = cierra;
+  });
+  if (cierreMasTardio === null) return '00:00';
+  const h24 = Math.floor(cierreMasTardio / 60);
+  const min = cierreMasTardio % 60;
+  return `${String(h24).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
+}

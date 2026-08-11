@@ -22,14 +22,18 @@ export const actualizarRestaurante = (restauranteId, datos) =>
 export const eliminarRestaurante = (restauranteId) =>
   deleteDoc(doc(db, 'restaurantes', restauranteId));
 
-// horaCierreConfiguradaEn queda para poder avisar en el panel que los
-// reportes anteriores a esa fecha se calcularon con día de calendario, no
-// con el cierre operativo — ver Admin.jsx.
-export const guardarHoraCierreOperativo = (restauranteId, horaCierreOperativo) =>
-  updateDoc(doc(db, 'restaurantes', restauranteId), {
-    horaCierreOperativo,
-    horaCierreConfiguradaEn: serverTimestamp(),
-  });
+// horaCierreOperativo ya no se pide aparte — se deriva de `horarios` (ver
+// derivarHoraCierreOperativo en src/utils/horarioRestaurante.js) y se guarda
+// en el mismo write que los horarios, para que nunca queden desincronizados.
+// horaCierreConfiguradaEn solo se toca cuando el valor derivado REALMENTE
+// cambia (marcarCambioDeCierre) — así el aviso de discontinuidad de
+// Admin.jsx no reinicia su fecha cada vez que se retocan horas que no
+// cruzan medianoche.
+export const guardarHorarios = (restauranteId, horarios, horaCierreOperativo, marcarCambioDeCierre) => {
+  const datos = { horarios, horaCierreOperativo };
+  if (marcarCambioDeCierre) datos.horaCierreConfiguradaEn = serverTimestamp();
+  return updateDoc(doc(db, 'restaurantes', restauranteId), datos);
+};
 
 export const agregarUidRol = (restauranteId, campo, uid) =>
   updateDoc(doc(db, 'restaurantes', restauranteId), { [campo]: arrayUnion(uid) });

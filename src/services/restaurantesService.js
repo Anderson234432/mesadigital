@@ -81,14 +81,14 @@ export const guardarTiempos = (restauranteId, tiempos) =>
 export const guardarImpuestos = (restauranteId, impuestos) =>
   repo.actualizarRestaurante(restauranteId, { impuestos });
 
-export const guardarHoraCierreOperativo = (restauranteId, horaCierreOperativo) =>
-  repo.guardarHoraCierreOperativo(restauranteId, horaCierreOperativo);
-
 export const guardarMarca = (restauranteId, marca) =>
   repo.actualizarRestaurante(restauranteId, { marca });
 
-export const guardarHorarios = (restauranteId, horarios) =>
-  repo.actualizarRestaurante(restauranteId, { horarios });
+// horaCierreOperativo va derivado de `horarios` (ver Admin.jsx,
+// handleGuardarHorarios) — un solo write atómico, nunca dos campos
+// relacionados guardados por separado.
+export const guardarHorarios = (restauranteId, horarios, horaCierreOperativo, marcarCambioDeCierre) =>
+  repo.guardarHorarios(restauranteId, horarios, horaCierreOperativo, marcarCambioDeCierre);
 
 export const guardarContacto = (restauranteId, contacto) =>
   repo.actualizarRestaurante(restauranteId, { contacto });
