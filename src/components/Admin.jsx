@@ -10,6 +10,8 @@ import { logout, getUid } from '../services/authService';
 import { rangoDiaOperativo, fechaOperativaHoy, parsearHoraCierre } from '../utils/fechaOperativa';
 import { derivarHoraCierreOperativo } from '../utils/horarioRestaurante';
 import { subirImagenMarca } from '../services/storageService';
+import { googleMapsUrlValida, AYUDA_GOOGLE_MAPS_INVALIDO, normalizarWhatsapp, normalizarInstagram, normalizarTelefono } from '../utils/contacto';
+import { agregarBotonesFaltantes, desactivarBotonesSinDato, origenBoton } from '../utils/botonesPortada';
 
 const DIAS_SEMANA = ['lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado', 'domingo'];
 const DIAS_SEMANA_LABEL = {
@@ -54,6 +56,7 @@ export default function Admin() {
   const [acceso, setAcceso] = useState(null);
   const [nombreRestaurante, setNombreRestaurante] = useState('');
   const [platos, setPlatos] = useState([]);
+  const [platosListos, setPlatosListos] = useState(false); // true tras la primera entrega de subscribePlatos — distingue "aún cargando" de "cargado y vacío"
   const [pedidos, setPedidos] = useState([]);
   const [ventasDiarias, setVentasDiarias] = useState([]);
   const [fechaFiltro, setFechaFiltro] = useState(localDateStr);
@@ -92,6 +95,8 @@ export default function Admin() {
     montadoRef.current = true;
     return () => { montadoRef.current = false; };
   }, []);
+
+  const bootstrapBotonesHechoRef = useRef(false);
 
   const formVacio = {
     nombre: '', nombreEn: '', precio: '', categoria: '', categoriaEn: '',
@@ -403,8 +408,37 @@ export default function Admin() {
         if (montadoRef.current) setAcceso(false);
       });
 
-    return subscribePlatos(restauranteId, setPlatos);
+    return subscribePlatos(restauranteId, (lista) => {
+      setPlatos(lista);
+      setPlatosListos(true);
+    });
   }, [restauranteId]);
+
+  // ─── Effect 1b: botones automáticos al abrir el panel ────────────────────
+  // Cubre la migración: un restaurante que ya tenía contacto guardado (o ya
+  // tenía platos) antes de este cambio nunca dispararía la creación
+  // automática si esta solo viviera en handleGuardarContacto — no va a
+  // volver a guardar algo que ya guardó. Se ejecuta una sola vez por sesión
+  // del panel (bootstrapBotonesHechoRef), y espera a que AMBOS — acceso y la
+  // primera entrega de platos — estén listos, para poder decidir el botón de
+  // carta con platosListos en vez de con platos.length === 0 (que también es
+  // el valor inicial antes de cargar). Lee botonesForm/contactoForm/platos
+  // ya cargados en este mismo render — deliberadamente no están en las deps
+  // para no re-disparar el efecto en cada edición del formulario.
+  useEffect(() => {
+    if (acceso !== true || !platosListos) return;
+    if (bootstrapBotonesHechoRef.current) return;
+    bootstrapBotonesHechoRef.current = true;
+    const { botones: nuevosBotones, cambio } = agregarBotonesFaltantes(botonesForm, contactoForm, platos.length > 0);
+    if (cambio) {
+      // Sincronización con Firestore (un sistema externo), no estado
+      // derivado — el caso legítimo que la regla no distingue.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setBotonesForm(nuevosBotones);
+      guardarBotones(restauranteId, nuevosBotones).catch((e) => console.error('Error creando botones automáticos:', e));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [acceso, platosListos]);
 
   // ─── Effect 2: pedidos del período ───────────────────────
   useEffect(() => {
@@ -574,10 +608,30 @@ export default function Admin() {
 
   // ── Contacto ─────────────────────────────────────────────────────────────
   const handleGuardarContacto = async () => {
+    if (!googleMapsUrlValida(contactoForm.googleMapsUrl)) {
+      mostrarMensaje(AYUDA_GOOGLE_MAPS_INVALIDO, 'error');
+      return;
+    }
+    const contactoNormalizado = {
+      ...contactoForm,
+      whatsapp: normalizarWhatsapp(contactoForm.whatsapp),
+      instagram: normalizarInstagram(contactoForm.instagram),
+      telefono: normalizarTelefono(contactoForm.telefono),
+    };
     setGuardandoContacto(true);
     try {
-      await guardarContacto(restauranteId, contactoForm);
-      if (montadoRef.current) mostrarMensaje('Contacto guardado.', 'ok');
+      // Guardar contacto ya es la intención de mostrarlo — crea los botones
+      // que falten y apaga (sin borrar) los que se quedaron sin dato. No
+      // toca 'carta' (tienePlatos: false aquí, eso lo maneja el efecto de
+      // arranque) ni ningún botón que el dueño ya tenga configurado.
+      const { botones: conFaltantes } = agregarBotonesFaltantes(botonesForm, contactoNormalizado, false);
+      const { botones: botonesFinal } = desactivarBotonesSinDato(conFaltantes, contactoNormalizado);
+      await guardarContacto(restauranteId, contactoNormalizado, botonesFinal);
+      if (montadoRef.current) {
+        setContactoForm(contactoNormalizado);
+        setBotonesForm(botonesFinal);
+        mostrarMensaje('Contacto guardado.', 'ok');
+      }
     } catch {
       if (montadoRef.current) mostrarMensaje('Error al guardar el contacto.', 'error');
     } finally {
@@ -586,10 +640,13 @@ export default function Admin() {
   };
 
   // ── Botones de la portada ────────────────────────────────────────────────
+  // Los 5 tipos automáticos (mapa/whatsapp/instagram/telefono/carta) se
+  // crean solos desde Contacto y desde el efecto de arranque — "+ Agregar
+  // enlace" queda solo para enlaces libres (reservaciones, eventos, etc.).
   const handleAgregarBoton = () => {
     setBotonesForm((prev) => [
       ...prev,
-      { id: nuevoBotonId(), etiqueta: '', etiquetaEn: '', tipo: 'carta', destino: '', activo: true, orden: prev.length },
+      { id: nuevoBotonId(), etiqueta: '', etiquetaEn: '', tipo: 'enlace', destino: '', activo: true, orden: prev.length },
     ]);
   };
 
@@ -651,6 +708,9 @@ export default function Admin() {
   const marcarListaMesaAdmin = (ids) =>
     actualizarEstadoMesa(restauranteId, ids, 'listo')
       .catch(() => mostrarMensaje('Error al marcar la mesa.', 'error'));
+
+  const tienePlatos = platos.length > 0;
+  const googleMapsInvalido = !!contactoForm.googleMapsUrl && !googleMapsUrlValida(contactoForm.googleMapsUrl);
 
   // ─── Early returns ────────────────────────────────────────
   if (acceso === null) return <div className="min-h-screen bg-neutral-950" />;
@@ -997,18 +1057,29 @@ export default function Admin() {
                 onChange={(e) => setContactoForm((f) => ({ ...f, direccion: e.target.value }))}
                 placeholder="Dirección"
                 className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-base" />
-              <input type="text" value={contactoForm.googleMapsUrl}
-                onChange={(e) => setContactoForm((f) => ({ ...f, googleMapsUrl: e.target.value }))}
-                placeholder="Enlace de Google Maps"
-                className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-base" />
+              <div>
+                <input type="text" value={contactoForm.googleMapsUrl}
+                  onChange={(e) => setContactoForm((f) => ({ ...f, googleMapsUrl: e.target.value }))}
+                  placeholder="Enlace de Google Maps"
+                  className={`w-full bg-neutral-900 border px-3 py-2 text-white placeholder-neutral-500 focus:outline-none text-base ${
+                    googleMapsInvalido ? 'border-red-500' : 'border-neutral-700 focus:border-amber-400'}`} />
+                {googleMapsInvalido && (
+                  <p className="text-red-400 text-xs mt-1">{AYUDA_GOOGLE_MAPS_INVALIDO}</p>
+                )}
+              </div>
               <input type="text" value={contactoForm.telefono}
                 onChange={(e) => setContactoForm((f) => ({ ...f, telefono: e.target.value }))}
                 placeholder="Teléfono"
                 className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-base" />
-              <input type="text" value={contactoForm.whatsapp}
-                onChange={(e) => setContactoForm((f) => ({ ...f, whatsapp: e.target.value }))}
-                placeholder="WhatsApp (con código de país, ej. 18095551234)"
-                className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-base" />
+              <div>
+                <input type="text" value={contactoForm.whatsapp}
+                  onChange={(e) => setContactoForm((f) => ({ ...f, whatsapp: e.target.value }))}
+                  placeholder="WhatsApp (con código de país, ej. 18095551234)"
+                  className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-base" />
+                {contactoForm.whatsapp.replace(/\D/g, '').length === 10 && (
+                  <p className="text-neutral-500 text-xs mt-1">Se guardará como {normalizarWhatsapp(contactoForm.whatsapp)} (le agregamos el código de país).</p>
+                )}
+              </div>
               <input type="text" value={contactoForm.instagram}
                 onChange={(e) => setContactoForm((f) => ({ ...f, instagram: e.target.value }))}
                 placeholder="Instagram (@usuario o enlace)"
@@ -1024,8 +1095,8 @@ export default function Admin() {
           <div className="border-t border-neutral-800 pt-5 mt-5">
             <h3 className="text-neutral-300 text-sm font-semibold mb-1">Botones de la portada</h3>
             <p className="text-neutral-600 text-xs mb-3">
-              Enciende solo los que te sirvan. El botón "Enlace libre" apunta a cualquier URL — úsalo para
-              reservaciones, eventos, o lo que necesites.
+              Se crean solos cuando guardas tus datos de contacto. Aquí puedes cambiarles el nombre, reordenarlos o
+              apagar los que no quieras mostrar.
             </p>
             <div className="space-y-3">
               {botonesForm.map((b, i) => (
@@ -1050,10 +1121,12 @@ export default function Admin() {
                   <input type="text" value={b.etiquetaEn} onChange={(e) => handleCambiarBoton(b.id, 'etiquetaEn', e.target.value)}
                     placeholder="Etiqueta en inglés (opcional)"
                     className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 text-base focus:outline-none focus:border-amber-400" />
-                  {b.tipo === 'enlace' && (
+                  {b.tipo === 'enlace' ? (
                     <input type="text" value={b.destino} onChange={(e) => handleCambiarBoton(b.id, 'destino', e.target.value)}
                       placeholder="URL de destino (https://...)"
                       className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 text-base focus:outline-none focus:border-amber-400" />
+                  ) : (
+                    <p className="text-neutral-600 text-xs">{origenBoton(b.tipo, contactoForm, tienePlatos)}</p>
                   )}
                   <label className="flex items-center gap-2 text-xs text-neutral-500">
                     <input type="checkbox" checked={b.activo} onChange={(e) => handleCambiarBoton(b.id, 'activo', e.target.checked)} />
@@ -1062,13 +1135,13 @@ export default function Admin() {
                 </div>
               ))}
               {botonesForm.length === 0 && (
-                <p className="text-neutral-600 text-xs">Sin botones configurados todavía.</p>
+                <p className="text-neutral-600 text-xs">Guarda tus datos de contacto arriba y los botones aparecerán aquí.</p>
               )}
             </div>
             <div className="flex gap-3 mt-4">
               <button onClick={handleAgregarBoton}
                 className="border border-neutral-600 text-neutral-400 px-4 py-2 text-sm hover:border-amber-400 hover:text-amber-400 transition-colors min-h-[44px]">
-                + Agregar botón
+                + Agregar enlace
               </button>
               <button onClick={handleGuardarBotones} disabled={guardandoBotones}
                 className="bg-amber-400 text-black px-6 py-2 font-bold hover:bg-amber-300 transition-colors disabled:opacity-50 min-h-[44px]">

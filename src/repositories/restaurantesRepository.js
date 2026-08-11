@@ -35,6 +35,13 @@ export const guardarHorarios = (restauranteId, horarios, horaCierreOperativo, ma
   return updateDoc(doc(db, 'restaurantes', restauranteId), datos);
 };
 
+// contacto y botones se guardan en el mismo write — guardar Contacto puede
+// crear/desactivar botones automáticos (ver agregarBotonesFaltantes y
+// desactivarBotonesSinDato en src/utils/botonesPortada.js) y no deben quedar
+// desincronizados entre sí. Mismo patrón que guardarHorarios.
+export const guardarContacto = (restauranteId, contacto, botones) =>
+  updateDoc(doc(db, 'restaurantes', restauranteId), { contacto, botones });
+
 export const agregarUidRol = (restauranteId, campo, uid) =>
   updateDoc(doc(db, 'restaurantes', restauranteId), { [campo]: arrayUnion(uid) });
 

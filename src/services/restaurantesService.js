@@ -90,8 +90,10 @@ export const guardarMarca = (restauranteId, marca) =>
 export const guardarHorarios = (restauranteId, horarios, horaCierreOperativo, marcarCambioDeCierre) =>
   repo.guardarHorarios(restauranteId, horarios, horaCierreOperativo, marcarCambioDeCierre);
 
-export const guardarContacto = (restauranteId, contacto) =>
-  repo.actualizarRestaurante(restauranteId, { contacto });
+// botones va junto con contacto — ver Admin.jsx (handleGuardarContacto) y
+// repo.guardarContacto (write atómico).
+export const guardarContacto = (restauranteId, contacto, botones) =>
+  repo.guardarContacto(restauranteId, contacto, botones);
 
 export const guardarBotones = (restauranteId, botones) =>
   repo.actualizarRestaurante(restauranteId, { botones });
