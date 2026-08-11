@@ -1030,6 +1030,11 @@ export default function Admin() {
             <div className="space-y-3">
               {botonesForm.map((b, i) => {
                 const destinoInvalido = b.activo && !destinoBotonValido(b.tipo, b.destino);
+                // La portada solo muestra un botón si tiene etiqueta en
+                // español (ver Portada.jsx) — sin ella, el visitante en
+                // español (el idioma por defecto) nunca lo ve, aunque esté
+                // activo y su destino sea válido.
+                const sinEtiqueta = b.activo && !(b.etiqueta || '').trim();
                 return (
                   <div key={b.id} className="border border-neutral-800 p-3 space-y-2">
                     <div className="flex items-center gap-2">
@@ -1046,9 +1051,15 @@ export default function Admin() {
                           className="text-xs border border-neutral-700 text-neutral-400 px-2 py-1 hover:border-red-400 hover:text-red-400 min-h-[32px]">✕</button>
                       </div>
                     </div>
-                    <input type="text" value={b.etiqueta} onChange={(e) => handleCambiarBoton(b.id, 'etiqueta', e.target.value)}
-                      placeholder="Etiqueta en español"
-                      className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 text-base focus:outline-none focus:border-amber-400" />
+                    <div>
+                      <input type="text" value={b.etiqueta} onChange={(e) => handleCambiarBoton(b.id, 'etiqueta', e.target.value)}
+                        placeholder="Etiqueta en español"
+                        className={`w-full bg-neutral-900 border px-3 py-2 text-white placeholder-neutral-500 text-base focus:outline-none ${
+                          sinEtiqueta ? 'border-red-500' : 'border-neutral-700 focus:border-amber-400'}`} />
+                      {sinEtiqueta && (
+                        <p className="text-red-400 text-xs mt-1">Este botón está activo pero no tiene etiqueta en español — no se mostrará en la portada.</p>
+                      )}
+                    </div>
                     <input type="text" value={b.etiquetaEn} onChange={(e) => handleCambiarBoton(b.id, 'etiquetaEn', e.target.value)}
                       placeholder="Etiqueta en inglés (opcional)"
                       className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 text-base focus:outline-none focus:border-amber-400" />
