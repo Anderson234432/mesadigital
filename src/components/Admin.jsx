@@ -1,10 +1,33 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useParams } from 'react-router-dom';
-import { verificarAccesoAdmin, guardarTiempos, guardarImpuestos, guardarHoraCierreOperativo } from '../services/restaurantesService';
+import {
+  verificarAccesoAdmin, guardarTiempos, guardarImpuestos, guardarHoraCierreOperativo,
+  guardarMarca, guardarHorarios, guardarContacto, guardarBotones,
+} from '../services/restaurantesService';
 import { subscribePlatos, guardarPlato, eliminarPlato, toggleDisponible } from '../services/platosService';
 import { subscribePedidosDia, subscribePedidosPeriodo, subscribeVentasDiarias, actualizarEstadoMesa } from '../services/pedidosService';
 import { logout, getUid } from '../services/authService';
 import { rangoDiaOperativo, fechaOperativaHoy, parsearHoraCierre } from '../utils/fechaOperativa';
+import { subirImagenMarca } from '../services/storageService';
+
+const DIAS_SEMANA = ['lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado', 'domingo'];
+const DIAS_SEMANA_LABEL = {
+  lunes: 'Lunes', martes: 'Martes', miercoles: 'Miércoles', jueves: 'Jueves',
+  viernes: 'Viernes', sabado: 'Sábado', domingo: 'Domingo',
+};
+const HORARIO_DIA_VACIO = { abre: '', cierra: '', cerrado: false };
+const TIPOS_BOTON = [
+  { tipo: 'carta', label: 'Ver carta' },
+  { tipo: 'mapa', label: 'Cómo llegar (mapa)' },
+  { tipo: 'whatsapp', label: 'WhatsApp' },
+  { tipo: 'instagram', label: 'Instagram' },
+  { tipo: 'telefono', label: 'Llamar' },
+  { tipo: 'enlace', label: 'Enlace libre (reservas, eventos, etc.)' },
+];
+
+function nuevoBotonId() {
+  return typeof crypto?.randomUUID === 'function' ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
 
 // Rango permitido para horaCierreOperativo — más allá de las 6 AM no tiene
 // sentido operativo (sería un error de captura), ver Admin > configuración.
@@ -58,6 +81,16 @@ export default function Admin() {
   const [horaCierreOperativo, setHoraCierreOperativo] = useState('00:00'); // valor guardado, usado para todos los cálculos
   const [horaCierreForm, setHoraCierreForm] = useState('00:00'); // valor del campo de configuración (puede diferir del guardado hasta que se guarda)
   const [horaCierreConfiguradaEn, setHoraCierreConfiguradaEn] = useState(null);
+  const [marcaForm, setMarcaForm] = useState({ logoUrl: '', portadaUrl: '', eslogan: '' });
+  const [logoFile, setLogoFile] = useState(null);
+  const [portadaFile, setPortadaFile] = useState(null);
+  const [subiendoMarca, setSubiendoMarca] = useState(false);
+  const [horariosForm, setHorariosForm] = useState({});
+  const [guardandoHorarios, setGuardandoHorarios] = useState(false);
+  const [contactoForm, setContactoForm] = useState({ direccion: '', googleMapsUrl: '', telefono: '', whatsapp: '', instagram: '' });
+  const [guardandoContacto, setGuardandoContacto] = useState(false);
+  const [botonesForm, setBotonesForm] = useState([]);
+  const [guardandoBotones, setGuardandoBotones] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [mensaje, setMensaje] = useState({ texto: '', tipo: '' });
   const [confirmarEliminarId, setConfirmarEliminarId] = useState(null);
@@ -76,6 +109,7 @@ export default function Admin() {
 
   // Mismo patrón que urlInvitacion en PanelMaestro.jsx.
   const urlCarta = `${import.meta.env.VITE_BASE_URL || window.location.origin}/restaurante/${restauranteId}/carta`;
+  const urlPortada = `${import.meta.env.VITE_BASE_URL || window.location.origin}/restaurante/${restauranteId}`;
 
   // ─── Valores derivados ────────────────────────────────────
   const fechaSeleccionada = useMemo(() => {
@@ -335,7 +369,10 @@ export default function Admin() {
   // ─── Effect 1: acceso + platos ────────────────────────────
   useEffect(() => {
     verificarAccesoAdmin(restauranteId)
-      .then(({ acceso: ok, nombre, tiempos, impuestos, horaCierreOperativo: hc, horaCierreConfiguradaEn: hcFecha }) => {
+      .then(({
+        acceso: ok, nombre, tiempos, impuestos, horaCierreOperativo: hc, horaCierreConfiguradaEn: hcFecha,
+        marca, horarios, contacto, botones,
+      }) => {
         if (!montadoRef.current) return;
         setAcceso(ok);
         if (ok) {
@@ -344,6 +381,18 @@ export default function Admin() {
           setImpuestosForm(impuestos);
           setHoraCierreOperativo(hc);
           setHoraCierreForm(hc);
+          setMarcaForm({ logoUrl: marca.logoUrl || '', portadaUrl: marca.portadaUrl || '', eslogan: marca.eslogan || '' });
+          // Los 7 días siempre presentes en el form, aunque el restaurante
+          // todavía no haya configurado ninguno — así cada campo tiene un
+          // valor controlado desde el primer render (nunca undefined).
+          setHorariosForm(
+            DIAS_SEMANA.reduce((acc, d) => ({ ...acc, [d]: { ...HORARIO_DIA_VACIO, ...(horarios[d] || {}) } }), {})
+          );
+          setContactoForm({
+            direccion: contacto.direccion || '', googleMapsUrl: contacto.googleMapsUrl || '',
+            telefono: contacto.telefono || '', whatsapp: contacto.whatsapp || '', instagram: contacto.instagram || '',
+          });
+          setBotonesForm(botones.length > 0 ? botones : []);
           // Normalizado a Date de una vez — así el resto del componente nunca
           // necesita saber si vino de Firestore (Timestamp) o de un guardado
           // optimista recién hecho (Date directo).
@@ -475,6 +524,122 @@ export default function Admin() {
     }
   };
 
+  // ── Marca (logo, portada, eslogan) ──────────────────────────────────────
+  const handleGuardarMarca = async () => {
+    setSubiendoMarca(true);
+    try {
+      let logoUrl = marcaForm.logoUrl;
+      let portadaUrl = marcaForm.portadaUrl;
+      // Mismo patrón que guardarPlato: si hay un archivo nuevo, se sube y
+      // comprime primero (subirImagenMarca ya valida el límite de 3MB).
+      if (logoFile) logoUrl = await subirImagenMarca(logoFile, restauranteId, 'logo');
+      if (portadaFile) portadaUrl = await subirImagenMarca(portadaFile, restauranteId, 'portada');
+      const nuevaMarca = { logoUrl, portadaUrl, eslogan: marcaForm.eslogan || '' };
+      await guardarMarca(restauranteId, nuevaMarca);
+      if (!montadoRef.current) return;
+      setMarcaForm(nuevaMarca);
+      setLogoFile(null);
+      setPortadaFile(null);
+      mostrarMensaje('Marca guardada.', 'ok');
+    } catch (e) {
+      if (montadoRef.current) {
+        mostrarMensaje(e.message === 'La imagen supera los 3MB.' ? e.message : 'Error al guardar la marca.', 'error');
+      }
+    } finally {
+      if (montadoRef.current) setSubiendoMarca(false);
+    }
+  };
+
+  // ── Horarios ─────────────────────────────────────────────────────────────
+  const handleCambiarHorarioDia = (dia, campo, valor) => {
+    setHorariosForm((prev) => ({ ...prev, [dia]: { ...prev[dia], [campo]: valor } }));
+  };
+
+  const handleAplicarATodos = (dia) => {
+    const valorDia = horariosForm[dia];
+    setHorariosForm((prev) =>
+      DIAS_SEMANA.reduce((acc, d) => ({ ...acc, [d]: { ...valorDia } }), prev)
+    );
+  };
+
+  const handleGuardarHorarios = async () => {
+    // Validación mínima: si un día no está marcado cerrado, sus horas deben
+    // tener formato válido — un horario a medio llenar rompería el cálculo
+    // de apertura en la portada y en Menu.jsx.
+    const invalido = DIAS_SEMANA.some((d) => {
+      const h = horariosForm[d];
+      if (h.cerrado) return false;
+      const abreVacio = !h.abre, cierraVacio = !h.cierra;
+      if (abreVacio && cierraVacio) return false; // día simplemente sin configurar, válido
+      return abreVacio || cierraVacio; // solo una de las dos horas puesta — inválido
+    });
+    if (invalido) {
+      mostrarMensaje('Cada día necesita hora de apertura Y cierre (o márcalo como cerrado).', 'error');
+      return;
+    }
+    setGuardandoHorarios(true);
+    try {
+      await guardarHorarios(restauranteId, horariosForm);
+      if (montadoRef.current) mostrarMensaje('Horarios guardados.', 'ok');
+    } catch {
+      if (montadoRef.current) mostrarMensaje('Error al guardar los horarios.', 'error');
+    } finally {
+      if (montadoRef.current) setGuardandoHorarios(false);
+    }
+  };
+
+  // ── Contacto ─────────────────────────────────────────────────────────────
+  const handleGuardarContacto = async () => {
+    setGuardandoContacto(true);
+    try {
+      await guardarContacto(restauranteId, contactoForm);
+      if (montadoRef.current) mostrarMensaje('Contacto guardado.', 'ok');
+    } catch {
+      if (montadoRef.current) mostrarMensaje('Error al guardar el contacto.', 'error');
+    } finally {
+      if (montadoRef.current) setGuardandoContacto(false);
+    }
+  };
+
+  // ── Botones de la portada ────────────────────────────────────────────────
+  const handleAgregarBoton = () => {
+    setBotonesForm((prev) => [
+      ...prev,
+      { id: nuevoBotonId(), etiqueta: '', etiquetaEn: '', tipo: 'carta', destino: '', activo: true, orden: prev.length },
+    ]);
+  };
+
+  const handleCambiarBoton = (id, campo, valor) => {
+    setBotonesForm((prev) => prev.map((b) => (b.id === id ? { ...b, [campo]: valor } : b)));
+  };
+
+  const handleQuitarBoton = (id) => {
+    setBotonesForm((prev) => prev.filter((b) => b.id !== id));
+  };
+
+  const handleMoverBoton = (id, direccion) => {
+    setBotonesForm((prev) => {
+      const idx = prev.findIndex((b) => b.id === id);
+      const nuevoIdx = idx + direccion;
+      if (nuevoIdx < 0 || nuevoIdx >= prev.length) return prev;
+      const copia = [...prev];
+      [copia[idx], copia[nuevoIdx]] = [copia[nuevoIdx], copia[idx]];
+      return copia.map((b, i) => ({ ...b, orden: i }));
+    });
+  };
+
+  const handleGuardarBotones = async () => {
+    setGuardandoBotones(true);
+    try {
+      await guardarBotones(restauranteId, botonesForm.map((b, i) => ({ ...b, orden: i })));
+      if (montadoRef.current) mostrarMensaje('Botones guardados.', 'ok');
+    } catch {
+      if (montadoRef.current) mostrarMensaje('Error al guardar los botones.', 'error');
+    } finally {
+      if (montadoRef.current) setGuardandoBotones(false);
+    }
+  };
+
   const copiarUid = async () => {
     const uid = getUid();
     if (!uid) return;
@@ -492,6 +657,15 @@ export default function Admin() {
       if (montadoRef.current) mostrarMensaje('Enlace de la carta copiado.', 'ok');
     } catch {
       if (montadoRef.current) mostrarMensaje(urlCarta, 'ok');
+    }
+  };
+
+  const copiarUrlPortada = async () => {
+    try {
+      await navigator.clipboard.writeText(urlPortada);
+      if (montadoRef.current) mostrarMensaje('Enlace de la portada copiado.', 'ok');
+    } catch {
+      if (montadoRef.current) mostrarMensaje(urlPortada, 'ok');
     }
   };
 
@@ -776,6 +950,180 @@ export default function Admin() {
             className="mt-4 bg-amber-400 text-black px-6 py-2 font-bold hover:bg-amber-300 transition-colors min-h-[44px]">
             Guardar impuestos
           </button>
+        </div>
+
+        {/* ── Portada pública ── */}
+        <div className="border border-neutral-800 p-6 mt-8">
+          <h2 className="text-amber-400 text-xs tracking-widest uppercase mb-1">Portada pública</h2>
+          <p className="text-neutral-500 text-xs mb-4">
+            La página que ve alguien que llega desde Instagram, Google o un link compartido.
+          </p>
+          <div className="flex flex-wrap items-center gap-3 mb-2">
+            <span className="text-neutral-400 text-xs font-mono truncate flex-1 min-w-0">{urlPortada}</span>
+            <button onClick={copiarUrlPortada}
+              className="text-xs border border-amber-400 text-amber-400 px-3 py-1 hover:bg-amber-400 hover:text-black transition-colors shrink-0 min-h-[32px]">
+              Copiar enlace
+            </button>
+          </div>
+
+          {/* Marca */}
+          <div className="border-t border-neutral-800 pt-5 mt-5">
+            <h3 className="text-neutral-300 text-sm font-semibold mb-3">Marca</h3>
+            <div className="space-y-3">
+              <div>
+                <label className="text-neutral-500 text-xs block mb-1">Logo</label>
+                <input type="file" accept="image/*" onChange={(e) => setLogoFile(e.target.files[0])}
+                  className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-neutral-400 focus:outline-none focus:border-amber-400 text-base" />
+                {marcaForm.logoUrl && !logoFile && (
+                  <img src={marcaForm.logoUrl} alt="Logo actual" className="w-16 h-16 rounded-xl object-cover mt-2 border border-neutral-700" />
+                )}
+              </div>
+              <div>
+                <label className="text-neutral-500 text-xs block mb-1">Foto de portada (fondo)</label>
+                <input type="file" accept="image/*" onChange={(e) => setPortadaFile(e.target.files[0])}
+                  className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-neutral-400 focus:outline-none focus:border-amber-400 text-base" />
+                {marcaForm.portadaUrl && !portadaFile && (
+                  <img src={marcaForm.portadaUrl} alt="Portada actual" className="w-full max-w-xs h-24 object-cover mt-2 border border-neutral-700" />
+                )}
+                <p className="text-neutral-600 text-xs mt-1">Máximo 3MB. Sin foto, la portada usa un fondo oscuro sólido.</p>
+              </div>
+              <div>
+                <label className="text-neutral-500 text-xs block mb-1">Eslogan</label>
+                <input type="text" value={marcaForm.eslogan}
+                  onChange={(e) => setMarcaForm((f) => ({ ...f, eslogan: e.target.value }))}
+                  placeholder="Una experiencia de sabor, ritmo y esencia"
+                  className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-base" />
+              </div>
+            </div>
+            <button onClick={handleGuardarMarca} disabled={subiendoMarca}
+              className="mt-4 bg-amber-400 text-black px-6 py-2 font-bold hover:bg-amber-300 transition-colors disabled:opacity-50 min-h-[44px]">
+              {subiendoMarca ? 'Guardando...' : 'Guardar marca'}
+            </button>
+          </div>
+
+          {/* Horarios */}
+          <div className="border-t border-neutral-800 pt-5 mt-5">
+            <h3 className="text-neutral-300 text-sm font-semibold mb-1">Horarios</h3>
+            <p className="text-neutral-600 text-xs mb-3">
+              Si cierras de madrugada, pon la hora de cierre del día siguiente (ej. abre 5:00 PM, cierra 2:00 AM).
+              Deja un día sin horas para no restringir pedidos ese día.
+            </p>
+            <div className="space-y-3">
+              {DIAS_SEMANA.map((dia) => (
+                <div key={dia} className="flex flex-wrap items-center gap-2">
+                  <span className="text-neutral-400 text-xs w-20 shrink-0">{DIAS_SEMANA_LABEL[dia]}</span>
+                  <input type="time" value={horariosForm[dia]?.abre || ''} disabled={horariosForm[dia]?.cerrado}
+                    onChange={(e) => handleCambiarHorarioDia(dia, 'abre', e.target.value)}
+                    className="bg-neutral-900 border border-neutral-700 px-2 py-2 text-white text-base focus:outline-none focus:border-amber-400 disabled:opacity-40 w-28" />
+                  <span className="text-neutral-600 text-xs">a</span>
+                  <input type="time" value={horariosForm[dia]?.cierra || ''} disabled={horariosForm[dia]?.cerrado}
+                    onChange={(e) => handleCambiarHorarioDia(dia, 'cierra', e.target.value)}
+                    className="bg-neutral-900 border border-neutral-700 px-2 py-2 text-white text-base focus:outline-none focus:border-amber-400 disabled:opacity-40 w-28" />
+                  <label className="flex items-center gap-1 text-xs text-neutral-500 ml-1">
+                    <input type="checkbox" checked={!!horariosForm[dia]?.cerrado}
+                      onChange={(e) => handleCambiarHorarioDia(dia, 'cerrado', e.target.checked)} />
+                    Cerrado
+                  </label>
+                  <button type="button" onClick={() => handleAplicarATodos(dia)}
+                    className="text-xs text-neutral-600 hover:text-amber-400 transition-colors ml-auto">
+                    Aplicar a todos
+                  </button>
+                </div>
+              ))}
+            </div>
+            <button onClick={handleGuardarHorarios} disabled={guardandoHorarios}
+              className="mt-4 bg-amber-400 text-black px-6 py-2 font-bold hover:bg-amber-300 transition-colors disabled:opacity-50 min-h-[44px]">
+              {guardandoHorarios ? 'Guardando...' : 'Guardar horarios'}
+            </button>
+          </div>
+
+          {/* Contacto */}
+          <div className="border-t border-neutral-800 pt-5 mt-5">
+            <h3 className="text-neutral-300 text-sm font-semibold mb-3">Contacto</h3>
+            <div className="space-y-3">
+              <input type="text" value={contactoForm.direccion}
+                onChange={(e) => setContactoForm((f) => ({ ...f, direccion: e.target.value }))}
+                placeholder="Dirección"
+                className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-base" />
+              <input type="text" value={contactoForm.googleMapsUrl}
+                onChange={(e) => setContactoForm((f) => ({ ...f, googleMapsUrl: e.target.value }))}
+                placeholder="Enlace de Google Maps"
+                className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-base" />
+              <input type="text" value={contactoForm.telefono}
+                onChange={(e) => setContactoForm((f) => ({ ...f, telefono: e.target.value }))}
+                placeholder="Teléfono"
+                className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-base" />
+              <input type="text" value={contactoForm.whatsapp}
+                onChange={(e) => setContactoForm((f) => ({ ...f, whatsapp: e.target.value }))}
+                placeholder="WhatsApp (con código de país, ej. 18095551234)"
+                className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-base" />
+              <input type="text" value={contactoForm.instagram}
+                onChange={(e) => setContactoForm((f) => ({ ...f, instagram: e.target.value }))}
+                placeholder="Instagram (@usuario o enlace)"
+                className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-base" />
+            </div>
+            <button onClick={handleGuardarContacto} disabled={guardandoContacto}
+              className="mt-4 bg-amber-400 text-black px-6 py-2 font-bold hover:bg-amber-300 transition-colors disabled:opacity-50 min-h-[44px]">
+              {guardandoContacto ? 'Guardando...' : 'Guardar contacto'}
+            </button>
+          </div>
+
+          {/* Botones */}
+          <div className="border-t border-neutral-800 pt-5 mt-5">
+            <h3 className="text-neutral-300 text-sm font-semibold mb-1">Botones de la portada</h3>
+            <p className="text-neutral-600 text-xs mb-3">
+              Enciende solo los que te sirvan. El botón "Enlace libre" apunta a cualquier URL — úsalo para
+              reservaciones, eventos, o lo que necesites.
+            </p>
+            <div className="space-y-3">
+              {botonesForm.map((b, i) => (
+                <div key={b.id} className="border border-neutral-800 p-3 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <select value={b.tipo} onChange={(e) => handleCambiarBoton(b.id, 'tipo', e.target.value)}
+                      className="bg-neutral-900 border border-neutral-700 px-2 py-2 text-white text-sm focus:outline-none focus:border-amber-400">
+                      {TIPOS_BOTON.map((tb) => <option key={tb.tipo} value={tb.tipo}>{tb.label}</option>)}
+                    </select>
+                    <div className="flex gap-1 ml-auto">
+                      <button type="button" onClick={() => handleMoverBoton(b.id, -1)} disabled={i === 0}
+                        className="text-xs border border-neutral-700 text-neutral-400 px-2 py-1 hover:border-amber-400 disabled:opacity-30 min-h-[32px]">▲</button>
+                      <button type="button" onClick={() => handleMoverBoton(b.id, 1)} disabled={i === botonesForm.length - 1}
+                        className="text-xs border border-neutral-700 text-neutral-400 px-2 py-1 hover:border-amber-400 disabled:opacity-30 min-h-[32px]">▼</button>
+                      <button type="button" onClick={() => handleQuitarBoton(b.id)}
+                        className="text-xs border border-neutral-700 text-neutral-400 px-2 py-1 hover:border-red-400 hover:text-red-400 min-h-[32px]">✕</button>
+                    </div>
+                  </div>
+                  <input type="text" value={b.etiqueta} onChange={(e) => handleCambiarBoton(b.id, 'etiqueta', e.target.value)}
+                    placeholder="Etiqueta en español"
+                    className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 text-base focus:outline-none focus:border-amber-400" />
+                  <input type="text" value={b.etiquetaEn} onChange={(e) => handleCambiarBoton(b.id, 'etiquetaEn', e.target.value)}
+                    placeholder="Etiqueta en inglés (opcional)"
+                    className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 text-base focus:outline-none focus:border-amber-400" />
+                  {b.tipo === 'enlace' && (
+                    <input type="text" value={b.destino} onChange={(e) => handleCambiarBoton(b.id, 'destino', e.target.value)}
+                      placeholder="URL de destino (https://...)"
+                      className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 text-base focus:outline-none focus:border-amber-400" />
+                  )}
+                  <label className="flex items-center gap-2 text-xs text-neutral-500">
+                    <input type="checkbox" checked={b.activo} onChange={(e) => handleCambiarBoton(b.id, 'activo', e.target.checked)} />
+                    Activo
+                  </label>
+                </div>
+              ))}
+              {botonesForm.length === 0 && (
+                <p className="text-neutral-600 text-xs">Sin botones configurados todavía.</p>
+              )}
+            </div>
+            <div className="flex gap-3 mt-4">
+              <button onClick={handleAgregarBoton}
+                className="border border-neutral-600 text-neutral-400 px-4 py-2 text-sm hover:border-amber-400 hover:text-amber-400 transition-colors min-h-[44px]">
+                + Agregar botón
+              </button>
+              <button onClick={handleGuardarBotones} disabled={guardandoBotones}
+                className="bg-amber-400 text-black px-6 py-2 font-bold hover:bg-amber-300 transition-colors disabled:opacity-50 min-h-[44px]">
+                {guardandoBotones ? 'Guardando...' : 'Guardar botones'}
+              </button>
+            </div>
+          </div>
         </div>
 
         {/* ── Mesas activas ── */}

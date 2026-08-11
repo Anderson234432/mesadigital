@@ -9,6 +9,16 @@ export async function subirImagenPlato(imagen, restauranteId) {
   return storageRepo.subirArchivo(`restaurantes/${restauranteId}/platos/${Date.now()}_${imagen.name}`, comprimida);
 }
 
+// Logo y foto de portada de la marca del restaurante. Mismo patrón de
+// compresión que las fotos de platos; solo cambia la ruta en Storage —
+// storage.rules tiene una regla equivalente para restaurantes/{id}/marca/**
+// (mismo admin-only-write que restaurantes/{id}/platos/**).
+export async function subirImagenMarca(imagen, restauranteId, tipo) {
+  if (imagen.size > 3 * 1024 * 1024) throw new Error('La imagen supera los 3MB.');
+  const comprimida = await imageCompression(imagen, OPCIONES_COMPRESION);
+  return storageRepo.subirArchivo(`restaurantes/${restauranteId}/marca/${tipo}_${Date.now()}_${imagen.name}`, comprimida);
+}
+
 export async function eliminarImagenPorUrl(url) {
   const path = storageRepo.extraerPathDeUrl(url);
   if (!path) return;

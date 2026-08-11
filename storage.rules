@@ -41,5 +41,19 @@ service firebase.storage {
           request.auth.uid in firestore.get(/databases/(default)/documents/restaurantes/$(restauranteId)).data.get('adminUids', [])
         );
     }
+
+    // ── Marca (logo + foto de portada) — misma regla que platos/, solo
+    // cambia la ruta. La portada pública lee estas imágenes por su URL de
+    // descarga directa, no por esta ruta de Storage — la lectura pública
+    // aquí es igual de necesaria que en platos/.
+    match /restaurantes/{restauranteId}/marca/{allPaths=**} {
+      allow read: if true;
+      allow write: if request.auth != null
+        && request.auth.token.firebase.sign_in_provider != 'anonymous'
+        && (
+          esMaestro() ||
+          request.auth.uid in firestore.get(/databases/(default)/documents/restaurantes/$(restauranteId)).data.get('adminUids', [])
+        );
+    }
   }
 }

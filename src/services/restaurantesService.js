@@ -24,6 +24,10 @@ export async function verificarAccesoAdmin(restauranteId) {
     impuestos: { ...IMPUESTOS_DEFAULT, ...(data.impuestos || {}) },
     horaCierreOperativo: data.horaCierreOperativo || '00:00',
     horaCierreConfiguradaEn: data.horaCierreConfiguradaEn || null,
+    marca: data.marca || {},
+    horarios: data.horarios || {},
+    contacto: data.contacto || {},
+    botones: data.botones || [],
   };
 }
 
@@ -79,6 +83,18 @@ export const guardarImpuestos = (restauranteId, impuestos) =>
 
 export const guardarHoraCierreOperativo = (restauranteId, horaCierreOperativo) =>
   repo.guardarHoraCierreOperativo(restauranteId, horaCierreOperativo);
+
+export const guardarMarca = (restauranteId, marca) =>
+  repo.actualizarRestaurante(restauranteId, { marca });
+
+export const guardarHorarios = (restauranteId, horarios) =>
+  repo.actualizarRestaurante(restauranteId, { horarios });
+
+export const guardarContacto = (restauranteId, contacto) =>
+  repo.actualizarRestaurante(restauranteId, { contacto });
+
+export const guardarBotones = (restauranteId, botones) =>
+  repo.actualizarRestaurante(restauranteId, { botones });
 
 export const guardarNumMesas = (restauranteId, numMesas) =>
   repo.actualizarRestaurante(restauranteId, { numMesas });

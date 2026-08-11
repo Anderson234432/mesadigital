@@ -7,6 +7,25 @@ const { getAuth } = require('firebase-admin/auth');
 const crypto = require('node:crypto');
 const { Resend } = require('resend');
 const { fechaOperativa } = require('./lib/fechaOperativa');
+const { puedeOrdenarAhora, calcularEstadoApertura, formatHora12 } = require('./lib/horarioRestaurante');
+
+// Mismo texto que Menu.jsx le muestra al cliente (ver
+// restauranteCerradoTitulo/restauranteAbre* en src/i18n.js) — se construye
+// aparte aquí porque el error de una Cloud Function es un string plano, no
+// puede devolver las piezas estructuradas que sí usa el cliente para su
+// propia píldora de estado.
+function mensajeRestauranteCerrado(horarios) {
+  const estado = calcularEstadoApertura(horarios, Date.now());
+  let cuando = '';
+  if (estado?.categoria === 'abreHoy') {
+    cuando = ` Abre hoy a las ${formatHora12(estado.horaAbre)}.`;
+  } else if (estado && (estado.categoria === 'otroDia' || estado.categoria === 'cerradoHoy')) {
+    cuando = estado.diasAdelante === 1
+      ? ` Abre mañana a las ${formatHora12(estado.horaAbre)}.`
+      : ` Abre el ${estado.nombreDiaApertura} a las ${formatHora12(estado.horaAbre)}.`;
+  }
+  return `El restaurante está cerrado en este momento.${cuando}`;
+}
 
 initializeApp();
 const db = getFirestore();
@@ -115,6 +134,19 @@ exports.crearPedido = onCall({ region: 'us-central1', timeoutSeconds: 30, minIns
   }
   const impuestosConfig = restauranteSnap.data()?.impuestos || {};
   const horaCierreOperativo = restauranteSnap.data()?.horaCierreOperativo || '00:00';
+
+  // ── Horario del restaurante: rechaza si está cerrado ────────────────────────
+  // El deshabilitado del botón en Menu.jsx es solo para la experiencia de
+  // usuario — cualquiera puede llamar esta función directo sin pasar por la
+  // interfaz, así que la validación real vive aquí. Sin `horarios` configurado
+  // no hay restricción (comportamiento idéntico al de antes). Incluye el mismo
+  // margen de gracia de 15 min tras el cierre que usa Menu.jsx, para no
+  // rechazar un pedido que llegó apenas unos segundos después de la hora
+  // nominal de cierre.
+  const horarios = restauranteSnap.data()?.horarios;
+  if (!puedeOrdenarAhora(horarios, Date.now())) {
+    throw new HttpsError('failed-precondition', mensajeRestauranteCerrado(horarios));
+  }
 
   // ── Fetch verified prices from server (fuera de la transacción: no necesita
   // atomicidad con lo demás, y evita cargar la transacción con hasta 30 reads) ──

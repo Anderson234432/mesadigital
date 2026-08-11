@@ -16,6 +16,17 @@
       "destination": "/api/carta-meta?restauranteId=:restauranteId"
     },
     {
+      "source": "/restaurante/:restauranteId",
+      "has": [
+        {
+          "type": "header",
+          "key": "user-agent",
+          "value": ".*(facebookexternalhit|Facebot|Twitterbot|WhatsApp|Slackbot|LinkedInBot|TelegramBot|Discordbot|Googlebot|bingbot|Applebot|Pinterest|redditbot|vkShare|W3C_Validator).*"
+        }
+      ],
+      "destination": "/api/portada-meta?restauranteId=:restauranteId"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }

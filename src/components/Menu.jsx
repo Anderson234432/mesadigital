@@ -4,6 +4,7 @@ import { t } from '../i18n';
 import { loginAnonimo } from '../services/authService';
 import { subscribeRestaurante } from '../services/restaurantesService';
 import { subscribePlatos } from '../services/platosService';
+import { calcularEstadoApertura, puedeOrdenarAhora, formatHora12 } from '../utils/horarioRestaurante';
 import {
   enviarPedido as enviarPedidoService,
   llamarMesero as llamarMeseroService,
@@ -99,6 +100,9 @@ function Menu() {
       return 'es';
     }
   });
+  // Reloj propio para el bloqueo por horario — igual patrón que el de
+  // Cocina.jsx/Portada.jsx. No toca ningún estado existente del carrito.
+  const [ahoraHorario, setAhoraHorario] = useState(() => Date.now());
 
   const montadoRef = useRef(true);
   const subsRef = useRef({});
@@ -143,6 +147,28 @@ function Menu() {
         if (montadoRef.current) setAuthReady(true);
       });
   }, []);
+
+  // ─── Bloqueo por horario (aviso al cliente — la validación real e
+  // insoslayable vive en crearPedido) ───────────────────────
+  useEffect(() => {
+    const id = setInterval(() => setAhoraHorario(Date.now()), 60000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Sin restaurante.horarios configurado, calcularEstadoApertura devuelve
+  // null y puedeOrdenarAhora siempre da true — cero restricción nueva, tal
+  // como pide el brief.
+  const estadoAperturaRestaurante = useMemo(
+    () => calcularEstadoApertura(restaurante?.horarios, ahoraHorario),
+    [restaurante, ahoraHorario]
+  );
+  // Usa el margen de gracia (15 min tras el cierre real) — mismo booleano que
+  // controla si el botón de enviar está habilitado y si se muestra el aviso,
+  // para que nunca queden en contradicción entre sí.
+  const restauranteAbiertoParaOrdenar = useMemo(
+    () => puedeOrdenarAhora(restaurante?.horarios, ahoraHorario),
+    [restaurante, ahoraHorario]
+  );
 
   // ─── Estado derivado ──────────────────────────────────────
   const total = useMemo(
@@ -363,7 +389,7 @@ function Menu() {
 
   // ─── Envío de pedido ──────────────────────────────────────
   const enviarPedido = useCallback(async () => {
-    if (envioRef.current || carrito.length === 0) return;
+    if (envioRef.current || carrito.length === 0 || !restauranteAbiertoParaOrdenar) return;
     envioRef.current = true;
     // Reintento tras timeout/error: conserva el UUID del intento anterior para
     // que la Cloud Function lo detecte como duplicado en vez de crear otro pedido.
@@ -428,7 +454,7 @@ function Menu() {
       if (montadoRef.current) setEnviando(false);
       envioRef.current = false;
     }
-  }, [carrito, nota, total, mesasPendientes, tiemposRestaurante, restauranteId, numeroMesa, lang, impuestosConfig]);
+  }, [carrito, nota, total, mesasPendientes, tiemposRestaurante, restauranteId, numeroMesa, lang, impuestosConfig, restauranteAbiertoParaOrdenar]);
 
   const llamarMesero = useCallback(async () => {
     if (llamandoMesero) return;
@@ -679,6 +705,19 @@ function Menu() {
                   </div>
                 </div>
               )}
+              {!restauranteAbiertoParaOrdenar && (
+                <div className="border border-red-800 bg-red-950 text-red-300 text-xs px-3 py-2 mb-3">
+                  <p className="font-bold">{t[lang].restauranteCerradoTitulo}</p>
+                  {estadoAperturaRestaurante?.categoria === 'abreHoy' && (
+                    <p>{t[lang].restauranteAbreHoyA(formatHora12(estadoAperturaRestaurante.horaAbre))}</p>
+                  )}
+                  {(estadoAperturaRestaurante?.categoria === 'otroDia' || estadoAperturaRestaurante?.categoria === 'cerradoHoy') && (
+                    estadoAperturaRestaurante.diasAdelante === 1
+                      ? <p>{t[lang].restauranteAbreMananaA(formatHora12(estadoAperturaRestaurante.horaAbre))}</p>
+                      : <p>{t[lang].restauranteAbreElDiaA(t[lang].diasSemana[estadoAperturaRestaurante.nombreDiaApertura], formatHora12(estadoAperturaRestaurante.horaAbre))}</p>
+                  )}
+                </div>
+              )}
               <textarea
                 value={nota}
                 onChange={(e) => setNota(e.target.value.slice(0, 500))}
@@ -695,7 +734,7 @@ function Menu() {
                 }} className="text-xs text-neutral-500 hover:text-red-400 transition-colors">
                   {t[lang].cancelar}
                 </button>
-                <button onClick={enviarPedido} disabled={enviando}
+                <button onClick={enviarPedido} disabled={enviando || !restauranteAbiertoParaOrdenar}
                   className="bg-amber-400 text-black px-6 py-3 font-bold hover:bg-amber-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed min-h-[44px]">
                   {enviando ? t[lang].enviando : t[lang].enviarPedido}
                 </button>

@@ -110,6 +110,20 @@ function PanelMaestro() {
     setTimeout(() => setMensaje({ texto: '', tipo: '' }), 3500);
   }
 
+  function urlPortada(restauranteId) {
+    return `${import.meta.env.VITE_BASE_URL || window.location.origin}/restaurante/${restauranteId}`;
+  }
+
+  async function copiarUrlPortada(restauranteId) {
+    try {
+      await navigator.clipboard.writeText(urlPortada(restauranteId));
+      setMensaje({ texto: 'Enlace de la portada copiado.', tipo: 'ok' });
+    } catch {
+      setMensaje({ texto: urlPortada(restauranteId), tipo: 'ok' });
+    }
+    setTimeout(() => setMensaje({ texto: '', tipo: '' }), 3500);
+  }
+
   // Número de mesas a mostrar: lo que el maestro tocó en esta sesión,
   // o si no, lo que ya está guardado en Firestore.
   function mesasDe(r) {
@@ -297,12 +311,18 @@ function PanelMaestro() {
                 <a href={`/restaurante/${r.id}/admin`} className="hover:underline">Admin →</a>
                 <a href={`/restaurante/${r.id}/cocina`} className="hover:underline">Cocina →</a>
                 <a href={`/restaurante/${r.id}/carta`} target="_blank" rel="noreferrer" className="hover:underline">Carta →</a>
+                <a href={`/restaurante/${r.id}`} target="_blank" rel="noreferrer" className="hover:underline">Portada →</a>
               </div>
-              <div className="flex gap-2 items-center mb-4">
+              <div className="flex flex-wrap gap-2 items-center mb-4">
                 <span className="text-neutral-600 text-xs font-mono truncate max-w-[200px]">{urlCarta(r.id)}</span>
                 <button onClick={() => copiarUrlCarta(r.id)}
                   className="text-xs border border-neutral-600 text-neutral-400 px-2 py-1 hover:border-amber-400 hover:text-amber-400 transition-colors shrink-0 min-h-[32px]">
                   Copiar carta
+                </button>
+                <span className="text-neutral-600 text-xs font-mono truncate max-w-[200px]">{urlPortada(r.id)}</span>
+                <button onClick={() => copiarUrlPortada(r.id)}
+                  className="text-xs border border-neutral-600 text-neutral-400 px-2 py-1 hover:border-amber-400 hover:text-amber-400 transition-colors shrink-0 min-h-[32px]">
+                  Copiar portada
                 </button>
               </div>
 

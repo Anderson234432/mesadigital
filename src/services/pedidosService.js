@@ -159,6 +159,13 @@ export function parsearErrorPedido(e) {
     return 'Demasiados pedidos seguidos. Espera un momento e intenta de nuevo.';
   if (code.includes('not-found') || msg.includes('no existe'))
     return 'Un plato ya no está en el menú. Recarga la página e intenta de nuevo.';
+  // Debe ir ANTES del failed-precondition genérico de abajo: ambos usan el
+  // mismo código, y sin este chequeo específico primero, un rechazo por
+  // restaurante cerrado (crearPedido, ver functions/index.js) caería en la
+  // rama de "plato no disponible" — un mensaje confuso y equivocado.
+  if (code.includes('failed-precondition') && msg.includes('cerrado')) {
+    return e.message; // ya viene en español, específico (día/hora si aplica) — no se genericiza
+  }
   if (code.includes('failed-precondition') || msg.includes('disponible')) {
     const match = e?.message?.match(/"([^"]+)"/);
     return match ? `"${match[1]}" ya no está disponible.` : 'Un plato ya no está disponible.';
