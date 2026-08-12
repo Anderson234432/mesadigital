@@ -70,6 +70,11 @@ export default function Admin() {
   const [platos, setPlatos] = useState([]);
   const [categoriasMeta, setCategoriasMeta] = useState([]);
   const [categoriaFileKeys, setCategoriaFileKeys] = useState({});
+  // Estado por slug (categoría o subcategoría) — mensaje de error PERSISTENTE
+  // (no se autodescarta como el toast de mostrarMensaje) y bandera de
+  // "subiendo", para que una falla nunca se sienta como que no pasó nada.
+  const [categoriasSubiendo, setCategoriasSubiendo] = useState({});
+  const [categoriasError, setCategoriasError] = useState({});
   const [pedidos, setPedidos] = useState([]);
   const [ventasDiarias, setVentasDiarias] = useState([]);
   const [fechaFiltro, setFechaFiltro] = useState(localDateStr);
@@ -554,8 +559,15 @@ export default function Admin() {
   };
 
   // ── Categorías (imagen + orden de presentación) ─────────────────────────
+  // El error de una subida NUNCA se queda solo en el toast de 3.5s
+  // (mostrarMensaje) — también se guarda en categoriasError[slug] y se
+  // muestra fijo junto al campo correspondiente, para que no dependa de que
+  // el dueño esté mirando la pantalla justo en ese momento. "Subiendo…" da
+  // señal de que sí pasó algo apenas se elige el archivo.
   const handleSubirImagenCategoria = async (slug, nombre, imagen) => {
     if (!imagen) return;
+    setCategoriasSubiendo((s) => ({ ...s, [slug]: true }));
+    setCategoriasError((er) => ({ ...er, [slug]: null }));
     try {
       await subirImagenCategoriaMeta(restauranteId, slug, imagen, { nombre, tipo: 'categoria' });
       if (montadoRef.current) {
@@ -563,23 +575,35 @@ export default function Admin() {
         mostrarMensaje('Imagen de categoría guardada.', 'ok');
       }
     } catch (e) {
+      const mensaje = e.message === 'La imagen supera los 3MB.' ? e.message : 'No se pudo subir la imagen. Intenta de nuevo.';
       if (montadoRef.current) {
-        mostrarMensaje(e.message === 'La imagen supera los 3MB.' ? e.message : 'Error al subir la imagen.', 'error');
+        setCategoriasError((er) => ({ ...er, [slug]: mensaje }));
+        mostrarMensaje(mensaje, 'error');
       }
+    } finally {
+      if (montadoRef.current) setCategoriasSubiendo((s) => ({ ...s, [slug]: false }));
     }
   };
 
   const handleQuitarImagenCategoria = async (slug, nombre, imagenUrlActual) => {
     try {
       await quitarImagenCategoriaMeta(restauranteId, slug, imagenUrlActual, { nombre, tipo: 'categoria' });
-      if (montadoRef.current) mostrarMensaje('Imagen quitada.', 'ok');
+      if (montadoRef.current) {
+        setCategoriasError((er) => ({ ...er, [slug]: null }));
+        mostrarMensaje('Imagen quitada.', 'ok');
+      }
     } catch {
-      if (montadoRef.current) mostrarMensaje('Error al quitar la imagen.', 'error');
+      if (montadoRef.current) {
+        setCategoriasError((er) => ({ ...er, [slug]: 'No se pudo quitar la imagen. Intenta de nuevo.' }));
+        mostrarMensaje('Error al quitar la imagen.', 'error');
+      }
     }
   };
 
   const handleSubirImagenSubcategoria = async (slug, categoria, nombre, imagen) => {
     if (!imagen) return;
+    setCategoriasSubiendo((s) => ({ ...s, [slug]: true }));
+    setCategoriasError((er) => ({ ...er, [slug]: null }));
     try {
       await subirImagenCategoriaMeta(restauranteId, slug, imagen, { nombre, tipo: 'subcategoria', categoriaSlug: slugify(categoria) });
       if (montadoRef.current) {
@@ -587,18 +611,28 @@ export default function Admin() {
         mostrarMensaje('Imagen de subcategoría guardada.', 'ok');
       }
     } catch (e) {
+      const mensaje = e.message === 'La imagen supera los 3MB.' ? e.message : 'No se pudo subir la imagen. Intenta de nuevo.';
       if (montadoRef.current) {
-        mostrarMensaje(e.message === 'La imagen supera los 3MB.' ? e.message : 'Error al subir la imagen.', 'error');
+        setCategoriasError((er) => ({ ...er, [slug]: mensaje }));
+        mostrarMensaje(mensaje, 'error');
       }
+    } finally {
+      if (montadoRef.current) setCategoriasSubiendo((s) => ({ ...s, [slug]: false }));
     }
   };
 
   const handleQuitarImagenSubcategoria = async (slug, categoria, nombre, imagenUrlActual) => {
     try {
       await quitarImagenCategoriaMeta(restauranteId, slug, imagenUrlActual, { nombre, tipo: 'subcategoria', categoriaSlug: slugify(categoria) });
-      if (montadoRef.current) mostrarMensaje('Imagen quitada.', 'ok');
+      if (montadoRef.current) {
+        setCategoriasError((er) => ({ ...er, [slug]: null }));
+        mostrarMensaje('Imagen quitada.', 'ok');
+      }
     } catch {
-      if (montadoRef.current) mostrarMensaje('Error al quitar la imagen.', 'error');
+      if (montadoRef.current) {
+        setCategoriasError((er) => ({ ...er, [slug]: 'No se pudo quitar la imagen. Intenta de nuevo.' }));
+        mostrarMensaje('Error al quitar la imagen.', 'error');
+      }
     }
   };
 
@@ -1041,8 +1075,9 @@ export default function Admin() {
                     )}
                     <div className="flex items-center gap-3 flex-wrap">
                       <input key={categoriaFileKeys[slugCat] || 0} type="file" accept="image/*"
+                        disabled={!!categoriasSubiendo[slugCat]}
                         onChange={(e) => handleSubirImagenCategoria(slugCat, cat.nombre, e.target.files[0])}
-                        className="flex-1 min-w-[180px] bg-neutral-900 border border-neutral-700 px-3 py-2 text-neutral-400 focus:outline-none focus:border-amber-400 text-sm" />
+                        className="flex-1 min-w-[180px] bg-neutral-900 border border-neutral-700 px-3 py-2 text-neutral-400 focus:outline-none focus:border-amber-400 text-sm disabled:opacity-50" />
                       {cat.imagenUrl && (
                         <button onClick={() => handleQuitarImagenCategoria(slugCat, cat.nombre, cat.imagenUrl)}
                           className="text-xs border border-neutral-600 text-neutral-400 px-3 py-1 hover:border-red-400 hover:text-red-400 transition-colors min-h-[32px]">
@@ -1050,6 +1085,12 @@ export default function Admin() {
                         </button>
                       )}
                     </div>
+                    {categoriasSubiendo[slugCat] && (
+                      <p className="text-neutral-500 text-xs mt-1">Subiendo…</p>
+                    )}
+                    {categoriasError[slugCat] && (
+                      <p className="text-red-400 text-xs mt-1">{categoriasError[slugCat]}</p>
+                    )}
 
                     {subcats.length > 0 && (
                       <div className="mt-4 pl-4 border-l border-neutral-800 space-y-3">
@@ -1072,8 +1113,9 @@ export default function Admin() {
                               )}
                               <div className="flex items-center gap-3 flex-wrap">
                                 <input key={categoriaFileKeys[slugSub] || 0} type="file" accept="image/*"
+                                  disabled={!!categoriasSubiendo[slugSub]}
                                   onChange={(e) => handleSubirImagenSubcategoria(slugSub, cat.nombre, sub.nombre, e.target.files[0])}
-                                  className="flex-1 min-w-[180px] bg-neutral-900 border border-neutral-700 px-3 py-2 text-neutral-400 focus:outline-none focus:border-amber-400 text-sm" />
+                                  className="flex-1 min-w-[180px] bg-neutral-900 border border-neutral-700 px-3 py-2 text-neutral-400 focus:outline-none focus:border-amber-400 text-sm disabled:opacity-50" />
                                 {sub.imagenUrl && (
                                   <button onClick={() => handleQuitarImagenSubcategoria(slugSub, cat.nombre, sub.nombre, sub.imagenUrl)}
                                     className="text-xs border border-neutral-600 text-neutral-400 px-3 py-1 hover:border-red-400 hover:text-red-400 transition-colors min-h-[32px]">
@@ -1081,6 +1123,12 @@ export default function Admin() {
                                   </button>
                                 )}
                               </div>
+                              {categoriasSubiendo[slugSub] && (
+                                <p className="text-neutral-500 text-xs mt-1">Subiendo…</p>
+                              )}
+                              {categoriasError[slugSub] && (
+                                <p className="text-red-400 text-xs mt-1">{categoriasError[slugSub]}</p>
+                              )}
                             </div>
                           );
                         })}
