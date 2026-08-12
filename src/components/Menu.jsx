@@ -6,10 +6,8 @@ import { subscribeRestaurante } from '../services/restaurantesService';
 import { subscribePlatos } from '../services/platosService';
 import { subscribeCategorias } from '../services/categoriasService';
 import { calcularEstadoApertura, puedeOrdenarAhora, formatHora12 } from '../utils/horarioRestaurante';
-import {
-  OTROS, listarCategorias, categoriaTieneSubcategorias, listarSubcategorias,
-  mapaEtiquetas, filtrarPlatosDeVista, buscarPlatos,
-} from '../utils/menuCategorias';
+import { buscarPlatos } from '../utils/menuCategorias';
+import MenuAcordeon from './MenuAcordeon';
 import {
   enviarPedido as enviarPedidoService,
   llamarMesero as llamarMeseroService,
@@ -94,8 +92,6 @@ function Menu() {
   const [nota, setNota] = useState('');
   const [enviando, setEnviando] = useState(false);
   const [llamandoMesero, setLlamandoMesero] = useState(false);
-  const [categoriaActiva, setCategoriaActiva] = useState(null);
-  const [subcategoriaActiva, setSubcategoriaActiva] = useState(null);
   const [busqueda, setBusqueda] = useState('');
   const [historialAbierto, setHistorialAbierto] = useState(false);
   const [pedidoEnviado, setPedidoEnviado] = useState('');
@@ -193,75 +189,19 @@ function Menu() {
     [carrito]
   );
 
-  const categorias = useMemo(
-    () => listarCategorias(platos, categoriasMeta),
-    [platos, categoriasMeta]
-  );
-
-  // Agrupación siempre por `categoria` (español, dato canónico) — solo la
-  // etiqueta mostrada cambia con el idioma, así no se rompe la agrupación si
-  // algún plato de la categoría no tiene categoriaEn.
-  const categoriaEnMap = useMemo(() => mapaEtiquetas(platos, 'categoria', 'categoriaEn'), [platos]);
-
-  const etiquetaCategoria = useCallback(
-    (cat) => (lang === 'en' && categoriaEnMap[cat]) || cat,
-    [lang, categoriaEnMap]
-  );
-
-  // Subcategorías: solo existen si algún plato de la categoría activa tiene
-  // `subcategoria` llena — categorías que no usan esta función navegan
-  // exactamente igual que antes (directo a los platos).
-  const categoriaTieneSubcats = useMemo(
-    () => (categoriaActiva ? categoriaTieneSubcategorias(platos, categoriaActiva) : false),
-    [platos, categoriaActiva]
-  );
-
-  const subcategorias = useMemo(
-    () => (categoriaActiva ? listarSubcategorias(platos, categoriaActiva, categoriasMeta) : []),
-    [platos, categoriaActiva, categoriasMeta]
-  );
-
-  const subcategoriaEnMap = useMemo(() => {
-    if (!categoriaActiva) return {};
-    return mapaEtiquetas(platos.filter((p) => p.categoria === categoriaActiva), 'subcategoria', 'subcategoriaEn');
-  }, [platos, categoriaActiva]);
-
-  const etiquetaSubcategoria = useCallback(
-    (sub) => (sub === OTROS ? t[lang].otros : (lang === 'en' && subcategoriaEnMap[sub]) || sub),
-    [lang, subcategoriaEnMap]
-  );
-
   const nombrePlato = useCallback(
     (plato) => (lang === 'en' && plato.nombreEn?.trim()) || plato.nombre,
     [lang]
   );
 
-  // Menu.jsx oculta platos agotados (no se pueden pedir) — Carta.jsx no.
-  const platosFiltrados = useMemo(
-    () => filtrarPlatosDeVista(platos, categoriaActiva, subcategoriaActiva, true),
-    [platos, categoriaActiva, subcategoriaActiva]
-  );
-
   // Busca en nombre/categoría/subcategoría (ES y EN) sin importar el idioma
   // activo — un turista escribiendo "mofongo" en modo inglés debe
-  // encontrarlo igual. Ignora la jerarquía de navegación (lista plana).
+  // encontrarlo igual. Ignora el acordeón (lista plana). Menu.jsx oculta
+  // platos agotados (no se pueden pedir) — Carta.jsx no.
   const resultadosBusqueda = useMemo(
     () => buscarPlatos(platos, busqueda, true),
     [platos, busqueda]
   );
-
-  // Volver desde la lista de platos: a subcategorías si la categoría las
-  // tiene (vino de ahí), si no directo a categorías — igual que antes de
-  // que existieran las subcategorías.
-  const volverDesdePlatos = useCallback(() => {
-    if (categoriaTieneSubcats) setSubcategoriaActiva(null);
-    else setCategoriaActiva(null);
-  }, [categoriaTieneSubcats]);
-
-  const volverACategorias = useCallback(() => {
-    setCategoriaActiva(null);
-    setSubcategoriaActiva(null);
-  }, []);
 
   // ─── Impuestos (ITBIS + propina legal) ───────────────────
   const impuestosConfig = useMemo(() => restaurante?.impuestos || {}, [restaurante]);
@@ -301,6 +241,23 @@ function Menu() {
       return n;
     });
   }, []);
+
+  // Render prop del acordeón — la lógica de carrito nunca sale de Menu.jsx,
+  // MenuAcordeon solo pide "dame el elemento visual para este plato".
+  const renderPlato = useCallback((plato) => {
+    const cantidad = carritoAgrupado.find((i) => i.id === plato.id)?.cantidad ?? 0;
+    return (
+      <PlatoItem
+        key={plato.id}
+        plato={plato}
+        nombreMostrado={nombrePlato(plato)}
+        cantidad={cantidad}
+        onAgregar={agregarAlCarrito}
+        onQuitar={quitarDelCarrito}
+        agregarLabel={t[lang].agregar}
+      />
+    );
+  }, [carritoAgrupado, nombrePlato, agregarAlCarrito, quitarDelCarrito, lang]);
 
   // ─── procesarPedidos (estable, usada también en polling) ──
   const procesarPedidos = useCallback((datos) => {
@@ -592,7 +549,7 @@ function Menu() {
           <input
             type="search"
             value={busqueda}
-            onChange={(e) => { setBusqueda(e.target.value); volverACategorias(); }}
+            onChange={(e) => setBusqueda(e.target.value)}
             placeholder={t[lang].buscarPlaceholder}
             className="w-full bg-neutral-900 border border-neutral-700 px-4 py-3 text-white placeholder-neutral-500 text-base focus:outline-none focus:border-amber-400"
           />
@@ -633,79 +590,14 @@ function Menu() {
             })
           )}
         </div>
-      ) : !categoriaActiva ? (
-        <div className="max-w-lg mx-auto px-4 py-4 grid grid-cols-1 gap-3">
-          {categorias.map((cat) => (
-            <button key={cat.nombre}
-              onClick={() => { setCategoriaActiva(cat.nombre); setSubcategoriaActiva(null); }}
-              className="relative w-full h-28 border border-neutral-700 overflow-hidden text-center hover:border-amber-400 transition-colors">
-              {cat.imagenUrl && (
-                <img src={cat.imagenUrl} alt="" loading="lazy"
-                  className="absolute inset-0 w-full h-full object-cover" />
-              )}
-              <div className="absolute inset-0 bg-black/50" />
-              <span className="relative z-10 flex items-center justify-center h-full text-lg font-semibold capitalize px-6 hover:text-amber-400 transition-colors">
-                {etiquetaCategoria(cat.nombre)}
-              </span>
-            </button>
-          ))}
-        </div>
-      ) : categoriaTieneSubcats && !subcategoriaActiva ? (
-        <div className="max-w-lg mx-auto px-4 py-6">
-          <div className="flex items-center gap-3 mb-6">
-            <button onClick={volverACategorias} className="text-amber-400 text-sm hover:underline">
-              ← {t[lang].volver}
-            </button>
-            <h2 className="text-amber-400 text-xs tracking-widest uppercase">
-              {etiquetaCategoria(categoriaActiva)}
-            </h2>
-          </div>
-          <div className="grid grid-cols-1 gap-3">
-            {subcategorias.map((sub) => (
-              <button key={sub.nombre === OTROS ? '__otros__' : sub.nombre}
-                onClick={() => setSubcategoriaActiva(sub.nombre)}
-                className="relative w-full h-28 border border-neutral-700 overflow-hidden text-center hover:border-amber-400 transition-colors">
-                {sub.imagenUrl && (
-                  <img src={sub.imagenUrl} alt="" loading="lazy"
-                    className="absolute inset-0 w-full h-full object-cover" />
-                )}
-                <div className="absolute inset-0 bg-black/50" />
-                <span className="relative z-10 flex items-center justify-center h-full text-lg font-semibold capitalize px-6 hover:text-amber-400 transition-colors">
-                  {etiquetaSubcategoria(sub.nombre)}
-                </span>
-              </button>
-            ))}
-          </div>
-        </div>
       ) : (
-        <div className="max-w-lg mx-auto px-4 py-6">
-          <div className="flex items-center gap-3 mb-6">
-            <button onClick={volverDesdePlatos}
-              className="text-amber-400 text-sm hover:underline">
-              ← {t[lang].volver}
-            </button>
-            <h2 className="text-amber-400 text-xs tracking-widest uppercase">
-              {t[lang].menuDe} {etiquetaCategoria(categoriaActiva)}
-              {subcategoriaActiva ? ` — ${etiquetaSubcategoria(subcategoriaActiva)}` : ''}
-            </h2>
-          </div>
-          <div className="space-y-4">
-            {platosFiltrados.map((plato) => {
-              const cantidad = carritoAgrupado.find((i) => i.id === plato.id)?.cantidad ?? 0;
-              return (
-                <PlatoItem
-                  key={plato.id}
-                  plato={plato}
-                  nombreMostrado={nombrePlato(plato)}
-                  cantidad={cantidad}
-                  onAgregar={agregarAlCarrito}
-                  onQuitar={quitarDelCarrito}
-                  agregarLabel={t[lang].agregar}
-                />
-              );
-            })}
-          </div>
-        </div>
+        <MenuAcordeon
+          platos={platos}
+          categoriasMeta={categoriasMeta}
+          lang={lang}
+          ocultarAgotados
+          renderPlato={renderPlato}
+        />
       )}
 
       {/* Notificación pedido enviado */}
