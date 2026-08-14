@@ -146,6 +146,8 @@ service cloud.firestore {
           // propina legal (10%), hasta +28% sobre el subtotal — se sube el
           // tope para no rechazar pedidos legítimos grandes con ambos
           // impuestos activos (50000 * 1.28 ≈ 64000).
+          // Mismo tope que MONTO_MAXIMO_PEDIDO en functions/index.js (camino
+          // normal, crearPedido) — si uno cambia, el otro también.
           request.resource.data.total is number &&
           request.resource.data.total >= 0 &&
           request.resource.data.total <= 65000 &&

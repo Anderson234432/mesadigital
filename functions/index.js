@@ -30,6 +30,12 @@ function mensajeRestauranteCerrado(horarios) {
 initializeApp();
 const db = getFirestore();
 
+// Mismo tope que `request.resource.data.total <= 65000` en firestore.rules
+// (camino de respaldo, allow create de pedidos) — si uno cambia, el otro
+// también. No hay una única fuente de verdad posible: las Rules no pueden
+// leer una constante de functions/, así que la sincronización es manual.
+const MONTO_MAXIMO_PEDIDO = 65000;
+
 const resendApiKey = defineSecret('RESEND_API_KEY');
 
 // ── Validación compartida por enviarCodigoInvitacion y canjearInvitacion ──────
@@ -85,12 +91,14 @@ function plantillaCorreoCodigo({ codigo, nombreRestaurante, rolLabel }) {
 /**
  * crearPedido — callable Cloud Function.
  *
- * Receives { restauranteId, mesa, items: [{id, cantidad}], nota, clienteUid }.
+ * Receives { restauranteId, mesa, items: [{id, cantidad}], nota }.
  * Fetches real prices from Firestore, computes the server-side total,
- * and writes the verified pedido. The client NEVER sends prices.
+ * and writes the verified pedido. The client NEVER sends prices — clienteUid
+ * tampoco: viene de request.auth.uid, nunca del cliente (ver chequeo de
+ * request.auth más abajo).
  */
 exports.crearPedido = onCall({ region: 'us-central1', timeoutSeconds: 30, minInstances: 1, enforceAppCheck: true }, async (request) => {
-  const { restauranteId, mesa, items, nota, clienteUid, idempotencyKey, token } = request.data;
+  const { restauranteId, mesa, items, nota, idempotencyKey, token } = request.data;
 
   // ── Input validation ────────────────────────────────────────────────────────
   // Se rechaza '/' porque restauranteId y mesa se usan para construir paths de
@@ -104,6 +112,14 @@ exports.crearPedido = onCall({ region: 'us-central1', timeoutSeconds: 30, minIns
   }
   if (!Array.isArray(items) || items.length === 0 || items.length > 30) {
     throw new HttpsError('invalid-argument', 'Items del pedido inválidos (máx 30).');
+  }
+  // El camino de fallback (firestore.rules) exige request.auth != null y
+  // clienteUid == request.auth.uid — sin eso, cualquiera con un token de App
+  // Check válido (sin autenticarse) podría escribir un clienteUid ajeno y
+  // contaminar el historial de pedidos de otro cliente (ver el mismo chequeo
+  // en firestore.rules, allow create de pedidos). Faltaba aquí.
+  if (!request.auth) {
+    throw new HttpsError('unauthenticated', 'Debes iniciar sesión para hacer un pedido.');
   }
 
   const mesaStr = mesa.trim().slice(0, 20);
@@ -189,16 +205,25 @@ exports.crearPedido = onCall({ region: 'us-central1', timeoutSeconds: 30, minIns
   const propina = impuestosConfig.propinaActivo ? Math.round(subtotal * propinaPct / 100) : 0;
   const total = subtotal + itbis + propina;
 
+  // El camino de respaldo (firestore.rules) rechaza el mismo total por encima
+  // de MONTO_MAXIMO_PEDIDO — se valida aquí también para que ambos caminos se
+  // comporten igual, y como red de seguridad: un total de seis cifras casi
+  // siempre es un error, no un cliente real. Antes de la transacción para no
+  // gastar escrituras en un pedido que se va a rechazar.
+  if (total > MONTO_MAXIMO_PEDIDO) {
+    throw new HttpsError('invalid-argument', 'El pedido supera el monto máximo permitido.');
+  }
+
   // ── Idempotencia + rate limiting (UID y mesa) + escritura: todo en una sola
   // transacción. Un check-then-write separado (como antes) deja una ventana
   // donde dos requests concurrentes leen el mismo estado "aún no existe / aún
   // no llegó al límite" antes de que ninguno escriba, y ambos pasan. La
   // transacción serializa esto: Firestore reintenta automáticamente si detecta
   // que otro request tocó los mismos documentos mientras esta corría.
-  // request.auth?.uid viene del token verificado por Firebase; clienteUid es
-  // dato del cliente y no debe tener prioridad, o el rate limit por UID se
-  // evade mandando un clienteUid distinto en cada request.
-  const uidKey = request.auth?.uid || clienteUid;
+  // request.auth.uid viene del token verificado por Firebase (ya se exige
+  // arriba); clienteUid es dato del cliente y no debe usarse aquí, o el rate
+  // limit por UID se evade mandando un clienteUid distinto en cada request.
+  const uidKey = request.auth.uid;
   const idempotencyQuery = (idempotencyKey && typeof idempotencyKey === 'string' && idempotencyKey.length <= 64)
     ? db.collection(`restaurantes/${restauranteId}/pedidos`).where('idempotencyKey', '==', idempotencyKey).limit(1)
     : null;
@@ -272,7 +297,7 @@ exports.crearPedido = onCall({ region: 'us-central1', timeoutSeconds: 30, minIns
       estado: 'pendiente',
       nota: (nota || '').slice(0, 500),
       creadoEn: FieldValue.serverTimestamp(),
-      clienteUid: request.auth?.uid || clienteUid || null,
+      clienteUid: request.auth.uid,
       idempotencyKey: (idempotencyKey && typeof idempotencyKey === 'string') ? idempotencyKey : null,
     });
 
