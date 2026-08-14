@@ -1305,6 +1305,12 @@ export default function Admin() {
                 </div>
               ))}
             </div>
+            {DIAS_SEMANA.every((d) => horariosForm[d]?.cerrado) && (
+              <div className="mt-3 border border-amber-800 bg-amber-950 text-amber-300 text-xs px-3 py-2">
+                Estás marcando el restaurante como cerrado todos los días. No se
+                podrán recibir pedidos hasta que abras algún día.
+              </div>
+            )}
             <button onClick={handleGuardarHorarios} disabled={guardandoHorarios}
               className="mt-4 bg-amber-400 text-black px-6 py-2 font-bold hover:bg-amber-300 transition-colors disabled:opacity-50 min-h-[44px]">
               {guardandoHorarios ? 'Guardando...' : 'Guardar horarios'}

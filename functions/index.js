@@ -221,7 +221,7 @@ exports.crearPedido = onCall({ region: 'us-central1', timeoutSeconds: 30, minIns
 
     if (idemSnap && !idemSnap.empty) {
       const d = idemSnap.docs[0];
-      return { pedidoId: d.id, total: d.data().total };
+      return { pedidoId: d.id, total: d.data().total, isNewMesa: false };
     }
 
     const now = Date.now();
@@ -276,11 +276,12 @@ exports.crearPedido = onCall({ region: 'us-central1', timeoutSeconds: 30, minIns
       idempotencyKey: (idempotencyKey && typeof idempotencyKey === 'string') ? idempotencyKey : null,
     });
 
-    if (isNewMesa) {
-      tx.update(db.doc(`restaurantes/${restauranteId}`), {
-        'stats.mesasPendientes': FieldValue.increment(1),
-      });
-    }
+    // stats.mesasPendientes se actualiza DESPUÉS de esta transacción, no acá
+    // dentro — ver el comentario junto a esa actualización, más abajo. isNewMesa
+    // sí se decide acá (lectura ya hecha arriba, dentro de la transacción) para
+    // no perder la foto consistente de "¿ya había un pedido pendiente en esta
+    // mesa cuando se creó este?" — solo se pospone la ESCRITURA del contador,
+    // que es lo que causaba contención, no la decisión de si hace falta.
 
     // ── Agregación de ventas diarias ────────────────────────────────────────
     // Un documento por día (restaurantes/{id}/ventasDiarias/{YYYY-MM-DD}) con
@@ -312,10 +313,32 @@ exports.crearPedido = onCall({ region: 'us-central1', timeoutSeconds: 30, minIns
       platos: platosField,
     }, { merge: true });
 
-    return { pedidoId: nuevoPedidoRef.id, total };
+    return { pedidoId: nuevoPedidoRef.id, total, isNewMesa };
   });
 
-  return resultado;
+  // stats.mesasPendientes solo alimenta el tiempo de espera ESTIMADO que ve
+  // el cliente (Menu.jsx) — un número aproximado y cosmético, no algo de lo
+  // que dependa dinero ni duplicados. Antes se actualizaba DENTRO de la
+  // transacción de arriba; bajo carga concurrente (Fase 2 de pruebas/carga),
+  // muchos pedidos de MESAS DISTINTAS escribiendo ese mismo campo del mismo
+  // documento del restaurante disparaban "ABORTED: cross-transaction
+  // contention" — Firestore abortando la transacción entera (pedido incluido)
+  // solo por chocar en un contador cosmético. FieldValue.increment es atómico
+  // a nivel de campo sin necesitar transacción, así que separar esto de la
+  // creación del pedido elimina esa contención sin arriesgar nada que
+  // importe: si esta actualización falla, el pedido YA se creó y NO se
+  // reintenta ni se revierte — se registra el error y se sigue.
+  if (resultado.isNewMesa) {
+    try {
+      await db.doc(`restaurantes/${restauranteId}`).update({
+        'stats.mesasPendientes': FieldValue.increment(1),
+      });
+    } catch (e) {
+      console.error('No se pudo actualizar stats.mesasPendientes (no crítico, el pedido ya se creó):', e);
+    }
+  }
+
+  return { pedidoId: resultado.pedidoId, total: resultado.total };
 });
 
 const CODIGO_EXPIRACION_MS = 10 * 60 * 1000;

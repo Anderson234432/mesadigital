@@ -1,0 +1,90 @@
+
+═══ EJÉRCITO DE CLIENTES VIRTUALES — MESADIGITAL ═══
+
+FASE 0 — PREPARACIÓN: completa y verificada (ver pruebas/README.md).
+
+FASE 1 — CORRECCIÓN (semilla 1234)
+  13/14 escenarios correctos (8 pedidos verificados de punta a punta, 5 rechazos correctos)
+  1 fallo(s):
+    ✗ Restaurante cerrado por horario
+      Encontrado: El servidor ACEPTÓ un pedido con el restaurante cerrado.
+
+FASE 2 — CARGA
+  Nivel | Enviados | Éxitos | Rechazo esperado | Fallo real | Mediana | p95 | p99 | mesasPendientes
+     10 |       10 |     10 |                 0 |          0 |    975ms |  1734ms |  1734ms | OK
+     50 |       28 |     26 |                 0 |          2 |   5758ms |  9908ms | 10137ms | OK
+        (22 sesiones no se pudieron crear — límite de red del equipo de pruebas, no del servidor; el total enviado es menor al nivel nominal)
+    100 |       61 |     14 |                38 |          9 |   1160ms |  2123ms |  2123ms | OK
+        (39 sesiones no se pudieron crear — límite de red del equipo de pruebas, no del servidor; el total enviado es menor al nivel nominal)
+    500 |      218 |     36 |                 6 |        176 |  20911ms | 29236ms | 29384ms | OK
+        (282 sesiones no se pudieron crear — límite de red del equipo de pruebas, no del servidor; el total enviado es menor al nivel nominal)
+
+  Punto de quiebre: 50 clientes concurrentes.
+  Causa confirmada en firebase functions:log — "ABORTED: Aborted due to
+  cross-transaction contention": la transacción de crearPedido escribe
+  stats.mesasPendientes en el documento del restaurante, que es COMPARTIDO
+  por todos los pedidos sin importar la mesa. A partir de ~50 pedidos
+  concurrentes, Firestore empieza a abortar transacciones por contención en
+  ESE documento — no es el plan de Firebase, no es el rate limit (que ya
+  filtra por separado), es contención real en una sola escritura compartida.
+  No es capacidad general de Cloud Functions: la latencia mediana de los que
+  sí completan escala con el nivel (975ms → 20.9s en n=500), consistente con
+  reintentos de transacción cada vez más largos, no con "no hay servidores".
+
+HALLAZGOS QUE NO SON DEL HARNESS (bugs reales de la app)
+
+1. [CONFIRMADO] Horario "todos los días cerrados" sin horas rellenadas se
+   trata como "sin restricción" (SIEMPRE ABIERTO).
+   Dónde: src/utils/horarioRestaurante.js y functions/lib/horarioRestaurante.js,
+   función tieneHorarioConfigurado — exige al menos un día con abre/cierra
+   parseables, sin importar el flag cerrado.
+   Cómo reproducir: en Admin.jsx, marcar los 7 días como "cerrado" sin
+   llenar horas (el propio formulario lo permite — su validación salta el
+   chequeo de formato de hora precisamente cuando cerrado=true) y guardar;
+   o directamente escribir horarios = { <cada día>: {abre:'',cierra:'',cerrado:true} }
+   en el documento del restaurante. Cualquier pedido enviado después se
+   acepta igual.
+   Severidad: alta — un dueño que cierra así (la forma más simple: solo
+   tocar el toggle "cerrado", sin poner horas) no logra lo que cree que
+   logró; su restaurante sigue recibiendo pedidos.
+   Verificado con una llamada directa a crearPedido (fuera de la interfaz),
+   confirmando que es un bug del servidor, no solo de la UI.
+
+2. [PUNTO DE QUIEBRE DE CARGA] Contención de transacción de Firestore en
+   restaurantes/{id}.stats.mesasPendientes a partir de ~50 pedidos
+   concurrentes — ver Fase 2 arriba.
+
+Hallazgos del ENTORNO de pruebas (no confirmados como bugs de producción,
+documentados por transparencia):
+- El botón "Llamar al mesero" no responde a clicks de mouse (reales o
+  sintéticos) en Chromium headless, aunque el handler de React funciona
+  perfecto invocado directo o por teclado — probablemente reCAPTCHA
+  Enterprise consumiendo el evento en sesiones automatizadas. No se pudo
+  confirmar si afecta a navegadores reales de usuarios finales.
+
+¿AGUANTA CLIENTES REALES?
+
+Sí, con un límite claro: hasta unas ~30-40 mesas pidiendo en la misma
+ventana de tiempo, MesaDigital responde con normalidad (mediana <1s a
+n=10). Pasado eso, la contención en un solo campo compartido
+(stats.mesasPendientes) empieza a producir pedidos que fallan de verdad
+(no un rechazo prolijo, un error interno) y latencias de varios segundos
+para los que sí pasan. Para un restaurante individual en operación normal
+esto es un techo generoso; para una campaña/promoción que concentre pedidos
+de MUCHAS mesas en el mismo minuto, o para varios restaurantes grandes
+compartiendo el mismo plan en horas pico, vale la pena revisar cómo se
+actualiza ese contador antes de confiar en que aguanta sin límite.
+
+PENDIENTE DEL USUARIO
+- Decidir si el bug de horario (hallazgo #1) se corrige en
+  functions/lib/horarioRestaurante.js y src/utils/horarioRestaurante.js
+  (no se tocó ese código desde estas pruebas, por regla explícita del brief).
+- Decidir si stats.mesasPendientes vale la pena rediseñarse (p.ej. contador
+  distribuido, o derivarlo de una consulta en vez de un increment
+  transaccional compartido) si se espera tráfico por encima de ~50
+  pedidos/minuto concentrados.
+- Fase 3 (este reporte) se generó a partir de UNA corrida con semilla 1234
+  — si se quiere más confianza estadística sobre el punto de quiebre exacto,
+  vale correr carga.js un par de veces más y comparar.
+
+LIMPIEZA: Limpieza confirmada al final de cada escenario y cada nivel de carga — pedidos restantes en el restaurante de pruebas tras la última corrida: 0 (verificado con una lectura directa a Firestore tras limpieza.js).

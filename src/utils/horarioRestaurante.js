@@ -76,9 +76,25 @@ function ventanaDeDia(diaIndice, horarioDelDia, margenGraciaMin) {
   return { inicio, fin: finBase + margenGraciaMin };
 }
 
+// ¿Tiene ESTE día una configuración real? Sí si está marcado cerrado
+// (aunque no tenga horas — "cerrado" ES la configuración, no la ausencia de
+// una) o si tiene abre/cierra válidos.
+function diaTieneConfiguracion(horarioDelDia) {
+  if (!horarioDelDia) return false;
+  if (horarioDelDia.cerrado) return true;
+  return parsearHora(horarioDelDia.abre) !== null && parsearHora(horarioDelDia.cierra) !== null;
+}
+
+// Antes exigía abre/cierra parseables sin importar `cerrado` — un día
+// marcado cerrado con horas vacías (la forma más natural de cerrar por
+// vacaciones: tocar el toggle, no inventar horas) no contaba como
+// "configurado". Con los 7 días así, esta función daba false y
+// puedeOrdenarAhora asumía "sin restricción" — el restaurante quedaba
+// SIEMPRE ABIERTO pese a que el dueño marcó todos los días como cerrados.
+// Misma corrección aplicada en functions/lib/horarioRestaurante.js.
 export function tieneHorarioConfigurado(horarios) {
   if (!horarios || typeof horarios !== 'object') return false;
-  return DIAS.some((d) => parsearHora(horarios[d]?.abre) !== null && parsearHora(horarios[d]?.cierra) !== null);
+  return DIAS.some((d) => diaTieneConfiguracion(horarios[d]));
 }
 
 function estaDentroDeVentana(horarios, ahoraMs, margenGraciaMin) {

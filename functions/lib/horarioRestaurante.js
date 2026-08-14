@@ -92,12 +92,28 @@ function ventanaDeDia(diaIndice, horarioDelDia, margenGraciaMin) {
   return { inicio, fin: finBase + margenGraciaMin };
 }
 
-// ¿Hay algún horario real configurado? (al menos un día con abre/cierra
-// válidos, sin importar si está marcado cerrado). Si no hay nada, ni la
-// portada ni el bloqueo de pedidos deben aplicar restricción alguna.
+// ¿Tiene ESTE día una configuración real? Sí si está marcado cerrado
+// (aunque no tenga horas — "cerrado" ES la configuración, no la ausencia de
+// una) o si tiene abre/cierra válidos.
+function diaTieneConfiguracion(horarioDelDia) {
+  if (!horarioDelDia) return false;
+  if (horarioDelDia.cerrado) return true;
+  return parsearHora(horarioDelDia.abre) !== null && parsearHora(horarioDelDia.cierra) !== null;
+}
+
+// ¿Hay algún horario real configurado? (al menos un día marcado cerrado, o
+// con abre/cierra válidos). Si no hay nada, ni la portada ni el bloqueo de
+// pedidos deben aplicar restricción alguna.
+//
+// Antes exigía abre/cierra parseables sin importar `cerrado` — un día
+// marcado cerrado con horas vacías (la forma más natural de cerrar por
+// vacaciones: tocar el toggle, no inventar horas) no contaba como
+// "configurado". Con los 7 días así, tieneHorarioConfigurado daba false y
+// puedeOrdenarAhora asumía "sin restricción" — el restaurante quedaba
+// SIEMPRE ABIERTO pese a que el dueño marcó todos los días como cerrados.
 function tieneHorarioConfigurado(horarios) {
   if (!horarios || typeof horarios !== 'object') return false;
-  return DIAS.some((d) => parsearHora(horarios[d]?.abre) !== null && parsearHora(horarios[d]?.cierra) !== null);
+  return DIAS.some((d) => diaTieneConfiguracion(horarios[d]));
 }
 
 // Núcleo compartido: ¿"ahora" cae dentro de la ventana de hoy o el arrastre

@@ -1,0 +1,6 @@
+node_modules
+.env.pruebas
+_manifiestos/*.json
+reporte/*.html
+reporte/*.json
+*.local

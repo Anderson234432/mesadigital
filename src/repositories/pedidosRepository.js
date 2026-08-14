@@ -1,7 +1,7 @@
 import {
   collection, doc, query, where, orderBy, limit, Timestamp, documentId,
   onSnapshot, getDocs, writeBatch, serverTimestamp, increment, enableNetwork,
-  runTransaction,
+  runTransaction, updateDoc,
 } from 'firebase/firestore';
 import { db } from '../firebase';
 
@@ -119,7 +119,7 @@ export const subscribeVentasDiarias = (restauranteId, fechaInicioStr, fechaFinSt
     onError
   );
 
-export function actualizarEstadoPedidos(restauranteId, ids, estado) {
+export async function actualizarEstadoPedidos(restauranteId, ids, estado) {
   if (estado !== 'archivado') {
     const batch = writeBatch(db);
     ids.forEach((id) =>
@@ -128,31 +128,49 @@ export function actualizarEstadoPedidos(restauranteId, ids, estado) {
     return batch.commit();
   }
 
-  // Archivar decrementa stats.mesasPendientes. Un doble tap/clic (común en
-  // móvil) puede disparar esta función dos veces para la misma mesa antes de
-  // que el listener refleje el cambio; con un batch simple eso decrementa dos
-  // veces y deja el contador negativo permanentemente. La transacción solo
-  // decrementa si algún PEDIDO REAL de esta tanda todavía no estaba
-  // archivado. Se excluyen los de tipo 'llamada' a propósito: crearLlamadaMesero
-  // nunca incrementa este contador (llamar al mesero no es un pedido), así que
+  // Un doble tap/clic (común en móvil) puede disparar esta función dos veces
+  // para la misma mesa antes de que el listener refleje el cambio; con un
+  // batch simple eso decrementa dos veces y deja el contador negativo
+  // permanentemente. La transacción de abajo solo decide decrementar si algún
+  // PEDIDO REAL de esta tanda todavía no estaba archivado — esa DECISIÓN sí
+  // necesita la foto consistente que da una transacción (lee estos mismos
+  // `refs` y escribe su `estado` ahí mismo, así un doble clic concurrente
+  // sobre los MISMOS pedidos se sigue serializando correctamente). Se
+  // excluyen los de tipo 'llamada' a propósito: crearLlamadaMesero nunca
+  // incrementa este contador (llamar al mesero no es un pedido), así que
   // descartar una llamada (Cocina.jsx: descartarLlamada) no debe decrementarlo
-  // — antes de este fix, archivar SOLO el documento de la llamada (que sigue
+  // — antes de ese fix, archivar SOLO el documento de la llamada (que sigue
   // 'pendiente' hasta ese momento) igual disparaba el decremento, restando 1 de
   // stats.mesasPendientes cada vez que se atendía una llamada al mesero, sin
   // que nada lo hubiera incrementado — el contador quedaba cada vez más
   // negativo (enmascarado en pantalla por el Math.max(0, ...) de Menu.jsx, pero
   // el valor real en Firestore seguía cayendo).
+  //
+  // La ESCRITURA del contador (a diferencia de la decisión) se hace fuera de
+  // esta transacción, después de que confirma — mismo motivo que en
+  // functions/index.js/crearPedido: bajo carga, muchos archivados/pedidos de
+  // mesas distintas escribiendo el mismo campo del mismo documento del
+  // restaurante DENTRO de una transacción chocan entre sí
+  // ("cross-transaction contention"). El contador es cosmético (solo el
+  // tiempo estimado que ve el cliente); si esta actualización falla, el
+  // archivado ya se aplicó igual — se registra el error y se sigue.
   const refs = ids.map((id) => doc(db, 'restaurantes', restauranteId, 'pedidos', id));
-  return runTransaction(db, async (tx) => {
+  const habiaActivos = await runTransaction(db, async (tx) => {
     const snaps = await Promise.all(refs.map((ref) => tx.get(ref)));
-    const habiaActivos = snaps.some((s) =>
+    const activos = snaps.some((s) =>
       s.exists() && s.data().estado !== 'archivado' && s.data().tipo !== 'llamada'
     );
     refs.forEach((ref) => tx.update(ref, { estado }));
-    if (habiaActivos) {
-      tx.update(doc(db, 'restaurantes', restauranteId), {
+    return activos;
+  });
+
+  if (habiaActivos) {
+    try {
+      await updateDoc(doc(db, 'restaurantes', restauranteId), {
         'stats.mesasPendientes': increment(-1),
       });
+    } catch (e) {
+      console.error('No se pudo actualizar stats.mesasPendientes (no crítico, el archivado ya se aplicó):', e);
     }
-  });
+  }
 }

@@ -1,0 +1,19 @@
+{
+  "name": "mesadigital-pruebas",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Ejército de clientes virtuales — pruebas de extremo a extremo y de carga contra un restaurante de pruebas aislado. Vive fuera de src/ y functions/ a propósito: no es parte del build ni del despliegue de la app.",
+  "scripts": {
+    "setup": "node setup.js",
+    "limpieza": "node limpieza.js",
+    "correccion": "node clientes/correr.js",
+    "carga": "node carga/carga.js",
+    "reporte": "node reporte/reporte.js"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.0.0",
+    "firebase": "^12.14.0",
+    "playwright": "^1.61.1"
+  }
+}
