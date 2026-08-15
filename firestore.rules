@@ -124,11 +124,22 @@ service cloud.firestore {
             resource.data.get('clienteUid', '') == request.auth.uid
           );
 
-        // Clientes (auth anónima requerida) pueden crear pedidos.
-        // La Cloud Function es el path normal (usa Admin SDK, omite estas reglas).
-        // Este es el fallback cuando Cloud Functions no está disponible: aquí es
-        // donde se rechazan pedidos con total/items fuera de rango, ya que este
-        // path no coteja precios contra platos/ (ver nota en pedidosRepository.js).
+        // Clientes (auth anónima requerida) pueden crear pedidos — pero SOLO
+        // "llamar al mesero" (tipo=='llamada', sin platos, total 0). Un
+        // pedido con platos reales SOLO puede crearlo la Cloud Function
+        // crearPedido (usa Admin SDK, omite estas reglas), que recalcula el
+        // precio contra platos/ en el momento. Hasta 2026-08-15 esta regla
+        // también aceptaba un pedido normal escrito directo por el cliente
+        // (el "camino de respaldo", crearPedidoDirecto) para cuando
+        // crearPedido fallaba — se eliminó tras medir uso real: solo 4.6% de
+        // los pedidos reales de producción pasaron por ahí, y el 100% de esos
+        // casos cayó en un único día, antes de que App Check quedara bien
+        // desplegado (commit cd378bb) — cero casos en las 3+ semanas
+        // siguientes. Ese camino nunca verificaba precio contra platos/
+        // (demostrado en vivo: un plato de RD$650 aceptado a RD$1) ni tenía
+        // límite de frecuencia — el riesgo real que quedaba abierto pesaba
+        // más que el pedido ocasional que salvaba. Ver el reporte de la
+        // auditoría "¿hace falta el camino de respaldo?" para los números.
         allow create: if
           request.auth != null &&
           request.resource.data.keys().hasAll(['mesa', 'items', 'total', 'estado', 'creadoEn']) &&
@@ -142,23 +153,10 @@ service cloud.firestore {
           request.resource.data.mesa.size() <= 20 &&
           restauranteExiste(restauranteId) &&
           tokenDeMesaValido(restauranteId, request.resource.data.mesa, request.resource.data.get('mesaToken', '')) &&
-          // 65000 en vez de 50000: el total ahora puede incluir ITBIS (18%) +
-          // propina legal (10%), hasta +28% sobre el subtotal — se sube el
-          // tope para no rechazar pedidos legítimos grandes con ambos
-          // impuestos activos (50000 * 1.28 ≈ 64000).
-          // Mismo tope que MONTO_MAXIMO_PEDIDO en functions/index.js (camino
-          // normal, crearPedido) — si uno cambia, el otro también.
-          request.resource.data.total is number &&
-          request.resource.data.total >= 0 &&
-          request.resource.data.total <= 65000 &&
+          request.resource.data.get('tipo', '') == 'llamada' &&
           request.resource.data.items is list &&
-          request.resource.data.items.size() <= 30 &&
-          (
-            // "Llamar al mesero" es un pedido sin platos: items vacío y total 0.
-            request.resource.data.get('tipo', '') == 'llamada'
-              ? (request.resource.data.items.size() == 0 && request.resource.data.total == 0)
-              : (request.resource.data.items.size() > 0 && request.resource.data.total >= 1)
-          ) &&
+          request.resource.data.items.size() == 0 &&
+          request.resource.data.total == 0 &&
           request.resource.data.get('nota', '') is string &&
           request.resource.data.get('nota', '').size() <= 500;
 

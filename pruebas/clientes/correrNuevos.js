@@ -311,28 +311,31 @@ async function escenarioND2() {
   });
 }
 
-// ND3 — Pedido que roza (o supera) el tope de RD$65,000 — ese tope vive en
-// firestore.rules para el camino de RESPALDO (crearPedidoDirecto, escritura
-// directa del cliente), no en la Cloud Function crearPedido, que jamás
-// compara `total` contra ningún techo. Este caso documenta esa asimetría.
+// ND3 — Pedido que roza (o supera) el tope de RD$65,000. Antes de
+// 2026-08-15 este tope vivía en firestore.rules para el camino de RESPALDO
+// (crearPedidoDirecto), no en crearPedido — ese respaldo ya no existe (ver
+// el reporte de la auditoría "¿hace falta el camino de respaldo?"), y
+// crearPedido tiene su propio tope (MONTO_MAXIMO_PEDIDO en
+// functions/index.js). Este caso ahora confirma justo eso: la Cloud
+// Function por sí sola rechaza un pedido muy por encima del tope, sin
+// depender de las Rules para nada relacionado a precio.
 async function escenarioND3() {
-  const nombre = 'Pedido que supera RD$65,000 (tope de firestore.rules)';
+  const nombre = 'Pedido que supera RD$65,000 (tope de crearPedido)';
   return conLimpiezaPrevia(async () => {
     const platoCaro = await crearPlatoTemporal({ nombre: 'Langosta Premium (temporal, prueba ND3)', precio: 3000 });
     const cliente = await crearClienteDirecto('nd3');
     try {
       // subtotal = 3000*30 = 90000; con ITBIS 18% + propina 10% (28%) el
-      // total ronda 115200 — muy por encima del tope de 65000 de las Rules.
+      // total ronda 115200 — muy por encima del tope de 65000.
       const items = Array.from({ length: 30 }, () => ({ id: platoCaro.id, cantidad: 1 }));
       const r = await cliente.crearPedido({ restauranteId: RESTAURANTE_ID, mesa: '1', items, token: mesaToken(1) });
       if (!r.ok) {
-        return registrar(nombre, 'paso', `El servidor rechazó el pedido por encima de RD$65,000: ${r.code} ${r.message} (no hace falta corregir nada — es más estricto de lo esperado).`);
+        return registrar(nombre, 'paso', `El servidor rechazó el pedido por encima de RD$65,000: ${r.code} ${r.message}`);
       }
       const totalReal = r.data.total;
       return registrar(nombre, 'fallo',
-        `crearPedido ACEPTÓ un pedido de RD$${totalReal} — muy por encima del tope de RD$65,000 que firestore.rules sí aplica en el camino de respaldo (crearPedidoDirecto). ` +
-        `La Cloud Function nunca compara \`total\` contra ningún techo — es una asimetría real entre los dos caminos de creación de pedidos, no un problema del arnés.`,
-        { severidad: 'menor', total: totalReal, esDeLaApp: true });
+        `crearPedido ACEPTÓ un pedido de RD$${totalReal} — muy por encima del tope de RD$65,000 que MONTO_MAXIMO_PEDIDO debía aplicar.`,
+        { severidad: 'critico', total: totalReal, esDeLaApp: true });
     } finally {
       await cliente.destruir();
       await borrarPlatoTemporal(platoCaro.id);
@@ -431,7 +434,7 @@ async function escenarioNN3() {
 // RECUPERACIÓN
 // ═════════════════════════════════════════════════════════════════════════
 
-// NR1 — Corte de red a mitad del envío, reconexión y reintento manual.
+// NR1 — Corte de red a mitad del envío, reintento manual sin duplicar.
 //
 // `context().setOffline(true)` resultó NO ser confiable para esto: en la
 // práctica no interrumpe una request que YA salió al cable (se observó la
@@ -440,23 +443,21 @@ async function escenarioNN3() {
 // determinista de simular "se cortó a mitad del envío" es interceptar la
 // request real y abortarla a propósito (page.route + route.abort()).
 //
-// Hallazgo real de la app encontrado al construir esto (ver reporte): con
-// la request de crearPedido abortada, el código clasifica el fallo como
-// funciones/internal y por diseño intenta el camino de RESPALDO
-// (crearPedidoDirecto, escritura directa a Firestore) — ese respaldo, en
-// esta misma sesión de navegador justo después del abort, es rechazado por
-// las Rules con "permission-denied" (reproducido y confirmado: la MISMA
-// escritura, con los MISMOS datos, desde una sesión de Node limpia, SÍ pasa
-// las Rules — no es un problema de lógica de las Rules en sí, es algo
-// puntual de esa sesión de navegador justo tras el fallo de red, no
-// determinado con certeza en el tiempo disponible). El resultado visible
-// para el cliente es un mensaje engañoso ("Accede escaneando el código QR
-// de tu mesa") que no tiene nada que ver con la causa real (un corte de
-// red). Lo que SÍ se confirma acá: pese a ese mensaje confuso, el carrito
-// se restaura (rollback optimista) y el idempotencyKey se conserva, así
-// que un reintento manual del usuario (clic de nuevo) sí crea el pedido
-// una sola vez — no hay pérdida de datos ni duplicado, solo una mala
-// experiencia momentánea.
+// Hasta 2026-08-15 esto revelaba un hallazgo real de la app: con la request
+// de crearPedido abortada, el código clasificaba el fallo como
+// funciones/internal y por diseño intentaba el camino de RESPALDO
+// (crearPedidoDirecto, escritura directa a Firestore) — que en esa misma
+// sesión de navegador fallaba con "permission-denied" de las Rules,
+// mostrando un mensaje engañoso ("Accede escaneando el código QR de tu
+// mesa") para lo que en realidad era un corte de red. Ese camino de
+// respaldo ya no existe (ver el reporte de la auditoría "¿hace falta el
+// camino de respaldo?" — se eliminó tras medir que resolvía menos del 5% de
+// los pedidos reales, todos concentrados antes de que App Check quedara
+// bien desplegado). Ahora un corte de red simplemente falla — sin intentar
+// nada más — y pedidosService.js muestra el mensaje claro y accionable de
+// parsearErrorPedido ("No pudimos enviar tu pedido. Llama al mesero o
+// intenta de nuevo."). Este escenario confirma eso, y que el reintento
+// manual del cliente (mismo idempotencyKey) sigue sin duplicar el pedido.
 async function escenarioNR1() {
   const nombre = 'Corte de red a mitad del envío, reintento manual sin duplicar';
   return conLimpiezaPrevia(async () => {
@@ -472,7 +473,10 @@ async function escenarioNR1() {
       await cliente.agregarPlato(plato, 1);
 
       const res1 = await cliente.enviarPedido();
-      const huboMensajeConfuso = res1.error && /QR/i.test(res1.textoError || '');
+      const mensajeClaro = /No pudimos enviar tu pedido/i.test(res1.textoError || '');
+      if (res1.error && !mensajeClaro) {
+        return registrar(nombre, 'fallo', `Tras el corte de red se esperaba el mensaje claro de parsearErrorPedido ("No pudimos enviar tu pedido...") — salió: "${res1.textoError}".`);
+      }
 
       const res2 = await cliente.enviarPedido(); // reintento manual, mismo idempotencyKey
       await cliente.page.waitForTimeout(1000);
@@ -485,10 +489,7 @@ async function escenarioNR1() {
         return registrar(nombre, 'fallo', `El reintento manual tras el corte de red no logró crear el pedido. intento1=${JSON.stringify(res1)} intento2=${JSON.stringify(res2)}`);
       }
       return registrar(nombre, 'paso',
-        `Sin duplicados ni pérdida: exactamente 1 pedido tras corte de red + reintento manual. ` +
-        (huboMensajeConfuso
-          ? `Nota aparte (hallazgo, no falla este escenario): el primer intento mostró un mensaje de error engañoso ("${res1.textoError}") para lo que en realidad fue un fallo de red — ver comentario del escenario.`
-          : `Mensaje del primer intento: "${res1.textoError}".`));
+        `Sin duplicados ni pérdida: exactamente 1 pedido tras corte de red + reintento manual. Mensaje del primer intento: "${res1.textoError}".`);
     } finally {
       await cliente.cerrar();
     }

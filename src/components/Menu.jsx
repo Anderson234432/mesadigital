@@ -409,7 +409,6 @@ function Menu() {
     // Optimistic UI — rollback en fallo
     const carritoSnapshot = [...carrito];
     const notaSnapshot = nota;
-    const totalSnapshot = total;
     setCarrito([]);
     setNota('');
     sessionStorage.removeItem(`carrito_${restauranteId}_${numeroMesa}`);
@@ -420,10 +419,9 @@ function Menu() {
       await Promise.race([
         enviarPedidoService(restauranteId, {
           mesa: numeroMesa, carrito: carritoSnapshot,
-          total: totalSnapshot, nota: notaSnapshot,
+          nota: notaSnapshot,
           clienteUid: clienteUidRef.current,
           idempotencyKey: idempotencyKeyRef.current,
-          impuestos: impuestosConfig,
         }),
         new Promise((_, reject) => {
           _timeoutId = setTimeout(() => reject(new Error('timeout')), 15000);
@@ -449,7 +447,7 @@ function Menu() {
       if (montadoRef.current) setEnviando(false);
       envioRef.current = false;
     }
-  }, [carrito, nota, total, mesasPendientes, tiemposRestaurante, restauranteId, numeroMesa, lang, impuestosConfig, restauranteAbiertoParaOrdenar]);
+  }, [carrito, nota, mesasPendientes, tiemposRestaurante, restauranteId, numeroMesa, lang, restauranteAbiertoParaOrdenar]);
 
   const llamarMesero = useCallback(async () => {
     if (llamandoMesero) return;

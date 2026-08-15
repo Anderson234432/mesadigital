@@ -63,62 +63,6 @@ export function crearLlamadaMesero(restauranteId, mesa, clienteUid, mesaToken) {
   return batch.commit();
 }
 
-// Fallback de emergencia: solo se usa si la Cloud Function crearPedido no
-// responde (ver pedidosService.js). Escribe el total y los precios de items[]
-// tal como los tiene el cliente en memoria — NO los coteja contra platos/,
-// a diferencia de la Cloud Function, que sí recalcula el precio server-side.
-// Las Rules de Firestore (allow create de pedidos) son la única validación de
-// precio en este camino: solo acotan el rango, no verifican precio real.
-export async function crearPedidoDirecto(restauranteId, { mesa, carrito, subtotal, itbis, propina, total, nota, clienteUid, idempotencyKey, mesaToken }) {
-  const pedidosRef = collection(db, 'restaurantes', restauranteId, 'pedidos');
-
-  // A diferencia de crearPedido (que hace este mismo chequeo dentro de una
-  // transacción), esta lectura y la escritura de más abajo NO son atómicas
-  // entre sí — dos reintentos concurrentes todavía podrían colarse los dos.
-  // Aun así, es mucho mejor que no chequear nada: withBackoff (pedidosService.js)
-  // reintenta este mismo camino completo ante un error de red, y sin este
-  // chequeo cada reintento exitoso-pero-percibido-como-fallido creaba un
-  // pedido duplicado real en la mesa.
-  if (idempotencyKey) {
-    const existenteSnap = await getDocs(
-      query(pedidosRef, where('idempotencyKey', '==', idempotencyKey), limit(1))
-    );
-    if (!existenteSnap.empty) return;
-  }
-
-  // isNewMesa: misma condición que la Cloud Function (mesa == mesa, estado ==
-  // 'pendiente'). Solo si no hay ya un pedido pendiente en esta mesa se
-  // incrementa stats.mesasPendientes — evita contar la misma mesa dos veces
-  // cuando el cliente envía una segunda ronda.
-  const existingPendienteSnap = await getDocs(
-    query(pedidosRef, where('mesa', '==', mesa), where('estado', '==', 'pendiente'), limit(1))
-  );
-  const isNewMesa = existingPendienteSnap.empty;
-
-  const batch = writeBatch(db);
-  const ref = doc(pedidosRef);
-  batch.set(ref, {
-    mesa,
-    items: carrito.map((p) => ({ nombre: p.nombre, nombreEn: p.nombreEn || null, precio: p.precio, tiempoMin: p.tiempoMin || 0, platoId: p.id })),
-    subtotal,
-    itbis,
-    propina,
-    total,
-    estado: 'pendiente',
-    nota: nota.slice(0, 500),
-    creadoEn: serverTimestamp(),
-    clienteUid: clienteUid || null,
-    idempotencyKey: idempotencyKey || null,
-    mesaToken: mesaToken || null,
-  });
-  if (isNewMesa) {
-    batch.update(doc(db, 'restaurantes', restauranteId), {
-      'stats.mesasPendientes': increment(1),
-    });
-  }
-  return batch.commit();
-}
-
 // ── Ventas diarias agregadas (escritas solo por la Cloud Function crearPedido) ──
 // Rango por ID de documento (YYYY-MM-DD ordena igual lexicográfica y
 // cronológicamente) — a lo sumo ~31 lecturas por mes, sin índice compuesto.

@@ -53,13 +53,21 @@ function leerTokenMesa(restauranteId, mesa) {
   }
 }
 
-// ─── Envío de pedido (Cloud Function + fallback directo) ──
-// `total` recibido aquí es el subtotal del carrito (suma de precios de
-// items, sin impuestos) — la CF lo recalcula desde platos/ de todos modos.
-// `impuestos` es la config del restaurante (restaurante.impuestos, ya
-// disponible en Menu.jsx vía subscribeRestaurante) — solo se usa en el
-// fallback directo, ya que la CF lee su propia copia server-side.
-export function enviarPedido(restauranteId, { mesa, carrito, total, nota, clienteUid, idempotencyKey, impuestos }) {
+// ─── Envío de pedido (solo Cloud Function — sin fallback directo) ──
+// Hasta 2026-08-15 existía un camino de respaldo (crearPedidoDirecto) que
+// escribía el pedido directo a Firestore con los precios que el cliente
+// tenía en memoria cuando crearPedido fallaba. Se eliminó tras medir uso
+// real en producción: de 108 pedidos reales del único restaurante en
+// producción, solo 5 (4.6%) se crearon por ese camino, y los 5 cayeron el
+// mismo día — antes de que App Check quedara bien desplegado (commit
+// cd378bb) — sin un solo caso más en las más de 3 semanas siguientes. A
+// cambio, ese camino nunca verificaba precios contra platos/ (demostrado en
+// vivo: un plato de RD$650 aceptado a RD$1) y no tenía ningún límite de
+// frecuencia. Si crearPedido falla ahora, withBackoff ya reintenta lo
+// razonable (errores de red/cuota) y si aun así no se puede enviar, el
+// error sube tal cual a quien llama — Menu.jsx lo traduce con
+// parsearErrorPedido en un mensaje claro y accionable.
+export function enviarPedido(restauranteId, { mesa, carrito, nota, clienteUid, idempotencyKey }) {
   const itemsAgrupados = carrito.reduce((acc, item) => {
     const e = acc.find((i) => i.id === item.id);
     if (e) e.cantidad += 1;
@@ -68,27 +76,9 @@ export function enviarPedido(restauranteId, { mesa, carrito, total, nota, client
   }, []);
   const token = leerTokenMesa(restauranteId, mesa);
 
-  async function tentarEnvio() {
-    try {
-      await getCrearPedidoFn()({ restauranteId, mesa, items: itemsAgrupados, nota, clienteUid, idempotencyKey, token });
-    } catch (cfErr) {
-      const cfCode = cfErr?.code || '';
-      // 'unauthenticated' cubre el rechazo de App Check (p.ej. si el sitio no
-      // tiene VITE_RECAPTCHA_SITE_KEY configurado): sin este caso, un fallo de
-      // App Check tumba el pedido por completo en vez de usar el fallback.
-      const notDeployed =
-        cfCode.includes('not-found') ||
-        cfCode.includes('unavailable') ||
-        cfCode.includes('internal') ||
-        cfCode.includes('unauthenticated');
-      if (!notDeployed) throw cfErr;
-
-      const desglose = calcularImpuestos(total, impuestos);
-      return pedidosRepo.crearPedidoDirecto(restauranteId, { mesa, carrito, nota, clienteUid, idempotencyKey, mesaToken: token, ...desglose });
-    }
-  }
-
-  return withBackoff(tentarEnvio);
+  return withBackoff(() =>
+    getCrearPedidoFn()({ restauranteId, mesa, items: itemsAgrupados, nota, clienteUid, idempotencyKey, token })
+  );
 }
 
 // ─── Llamada al mesero ────────────────────────────────────
@@ -174,5 +164,9 @@ export function parsearErrorPedido(e) {
     return 'Error en el pedido. Verifica tu selección e intenta de nuevo.';
   if (code.includes('permission-denied'))
     return 'Accede escaneando el código QR de tu mesa.';
-  return 'Error al enviar el pedido. Intenta de nuevo.';
+  // Sin código conocido de la Cloud Function (red cortada, función no
+  // disponible, error interno) — ya no hay camino de respaldo que lo
+  // absorba en silencio (ver enviarPedido más arriba): el pedido de verdad
+  // no se envió, hay que decírselo claro y con una salida real.
+  return 'No pudimos enviar tu pedido. Llama al mesero o intenta de nuevo.';
 }
