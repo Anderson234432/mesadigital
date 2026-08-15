@@ -162,10 +162,31 @@ service cloud.firestore {
           request.resource.data.get('nota', '') is string &&
           request.resource.data.get('nota', '').size() <= 500;
 
-        // Solo personal (cocina y admin) puede cambiar estado o archivar pedidos
-        allow update, delete: if
+        // Solo personal (cocina y admin) puede cambiar el estado — y SOLO el
+        // estado, y solo hacia adelante (pendiente→listo, pendiente→archivado
+        // — la app puede saltar directo a archivado si el cliente se fue sin
+        // que cocina lo marcara listo, o al descartar una llamada de mesero
+        // que nunca pasa por 'listo' — o listo→archivado). Ningún camino de
+        // la app escribe otro campo aquí ni retrocede un estado (ver
+        // actualizarEstadoPedidos en pedidosRepository.js) — antes esta regla
+        // permitía a CUALQUIER personal (incluida cocina, que solo debería
+        // poder tocar disponibilidad de platos) reescribir total/items/
+        // clienteUid de cualquier pedido sin dejar rastro, o revertir un
+        // pedido ya archivado.
+        allow update: if
           request.auth != null &&
-          esPersonal(restauranteId);
+          esPersonal(restauranteId) &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['estado']) &&
+          (
+            (resource.data.estado == 'pendiente' && request.resource.data.estado in ['listo', 'archivado']) ||
+            (resource.data.estado == 'listo' && request.resource.data.estado == 'archivado')
+          );
+
+        // Nada en la app borra un pedido desde el cliente (limpiarPedidosAntiguos
+        // usa el Admin SDK, que ignora estas reglas) — permitir delete aquí solo
+        // le daba a cualquier cocina/admin una forma de borrar evidencia de un
+        // pedido sin dejar rastro.
+        allow delete: if false;
       }
 
       // ── Rate limits (solo Cloud Function via Admin SDK) ──────────────────────
@@ -178,9 +199,12 @@ service cloud.firestore {
       // Un documento por día con totales y ranking de platos ya sumados —
       // Admin.jsx lee esto para semana/mes en vez de leer todos los pedidos
       // del período (lo que causaba el límite de 500 y totales incompletos).
-      // Solo personal del restaurante puede leerlo (dato de ventas sensible).
+      // Solo ADMIN puede leerlo (dato de ventas sensible) — esPersonal()
+      // también es cierto para cocina, que según el resto de la app no debe
+      // ver ventas (Cocina.jsx no expone esta pantalla, pero antes las
+      // reglas sí se lo permitían vía una query directa).
       match /ventasDiarias/{fecha} {
-        allow read: if esPersonal(restauranteId);
+        allow read: if esAdmin(restauranteId);
         allow write: if false;
       }
 

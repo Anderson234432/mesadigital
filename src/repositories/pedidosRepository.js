@@ -72,6 +72,20 @@ export function crearLlamadaMesero(restauranteId, mesa, clienteUid, mesaToken) {
 export async function crearPedidoDirecto(restauranteId, { mesa, carrito, subtotal, itbis, propina, total, nota, clienteUid, idempotencyKey, mesaToken }) {
   const pedidosRef = collection(db, 'restaurantes', restauranteId, 'pedidos');
 
+  // A diferencia de crearPedido (que hace este mismo chequeo dentro de una
+  // transacción), esta lectura y la escritura de más abajo NO son atómicas
+  // entre sí — dos reintentos concurrentes todavía podrían colarse los dos.
+  // Aun así, es mucho mejor que no chequear nada: withBackoff (pedidosService.js)
+  // reintenta este mismo camino completo ante un error de red, y sin este
+  // chequeo cada reintento exitoso-pero-percibido-como-fallido creaba un
+  // pedido duplicado real en la mesa.
+  if (idempotencyKey) {
+    const existenteSnap = await getDocs(
+      query(pedidosRef, where('idempotencyKey', '==', idempotencyKey), limit(1))
+    );
+    if (!existenteSnap.empty) return;
+  }
+
   // isNewMesa: misma condición que la Cloud Function (mesa == mesa, estado ==
   // 'pendiente'). Solo si no hay ya un pedido pendiente en esta mesa se
   // incrementa stats.mesasPendientes — evita contar la misma mesa dos veces
