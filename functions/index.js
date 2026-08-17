@@ -30,10 +30,12 @@ function mensajeRestauranteCerrado(horarios) {
 initializeApp();
 const db = getFirestore();
 
-// Mismo tope que `request.resource.data.total <= 65000` en firestore.rules
-// (camino de respaldo, allow create de pedidos) — si uno cambia, el otro
-// también. No hay una única fuente de verdad posible: las Rules no pueden
-// leer una constante de functions/, así que la sincronización es manual.
+// Tope de monto de un pedido — red de seguridad (un total de seis cifras
+// casi siempre es un error, no un cliente real). Ya no necesita sincronizarse
+// con firestore.rules: desde que se eliminó el camino de respaldo
+// (crearPedidoDirecto), esta es la ÚNICA ruta por la que se crea un pedido
+// con platos reales — las Rules solo permiten "llamar al mesero" desde el
+// cliente (ver firestore.rules, allow create de pedidos).
 const MONTO_MAXIMO_PEDIDO = 65000;
 
 const resendApiKey = defineSecret('RESEND_API_KEY');
@@ -96,8 +98,24 @@ function plantillaCorreoCodigo({ codigo, nombreRestaurante, rolLabel }) {
  * and writes the verified pedido. The client NEVER sends prices — clienteUid
  * tampoco: viene de request.auth.uid, nunca del cliente (ver chequeo de
  * request.auth más abajo).
+ *
+ * minInstances apagado (medido en la auditoría de costos, 2026-08-17): con
+ * minInstances:1 esta función sola mantenía una instancia de 256Mi/1vCPU
+ * corriendo 24/7 — 2,592,000 segundos facturables al mes, muy por encima de
+ * la capa gratuita de Cloud Functions, pagado desde el primer día sin un
+ * solo cliente. Medido end-to-end con minInstances:0 (arranque en frío real,
+ * confirmado por el log "Starting new instance"): 2894ms en frío vs.
+ * 440-496ms en caliente — unos 2.4s de más. El carrito ya se vacía de
+ * inmediato en Menu.jsx (interfaz optimista) antes de que la respuesta
+ * llegue, así que esos 2.4s no se sienten como una espera bloqueada, solo
+ * retrasan un poco el aviso de "pedido enviado" (que de por sí ya tolera un
+ * timeout de 15s en el cliente). Reactivar minInstances:1
+ * cuando el volumen real (varios restaurantes con tráfico simultáneo
+ * frecuente) haga que el costo del arranque en frío pese más que el costo
+ * fijo de mantenerla siempre caliente — ver el reporte de la auditoría de
+ * costos para los números exactos.
  */
-exports.crearPedido = onCall({ region: 'us-central1', timeoutSeconds: 30, minInstances: 1, enforceAppCheck: true }, async (request) => {
+exports.crearPedido = onCall({ region: 'us-central1', timeoutSeconds: 30, enforceAppCheck: true }, async (request) => {
   const { restauranteId, mesa, items, nota, idempotencyKey, token } = request.data;
 
   // ── Input validation ────────────────────────────────────────────────────────
