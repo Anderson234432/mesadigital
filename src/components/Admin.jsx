@@ -917,7 +917,7 @@ export default function Admin() {
           <div>
             <input name="nombreEn" placeholder="Nombre en inglés (opcional)" value={form.nombreEn} onChange={handleChange}
               className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-base" />
-            <p className="text-neutral-600 text-xs mt-1">Si lo dejas vacío, se mostrará el nombre en español.</p>
+            <p className="text-neutral-400 text-xs mt-1">Si lo dejas vacío, se mostrará el nombre en español.</p>
           </div>
           <input name="precio" placeholder="Precio *" type="number" value={form.precio} onChange={handleChange}
             className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-base" />
@@ -929,7 +929,7 @@ export default function Admin() {
           <div>
             <input name="categoriaEn" placeholder="Categoría en inglés (opcional)" value={form.categoriaEn} onChange={handleChange}
               className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-base" />
-            <p className="text-neutral-600 text-xs mt-1">Si lo dejas vacío, se mostrará la categoría en español.</p>
+            <p className="text-neutral-400 text-xs mt-1">Si lo dejas vacío, se mostrará la categoría en español.</p>
           </div>
           <div>
             <input name="subcategoria" list="subcategorias-existentes" placeholder="Subcategoría (opcional)" value={form.subcategoria} onChange={handleChange}
@@ -937,14 +937,14 @@ export default function Admin() {
             <datalist id="subcategorias-existentes">
               {subcategoriasExistentesDeCategoria.map((s) => <option key={s} value={s} />)}
             </datalist>
-            <p className="text-neutral-600 text-xs mt-1">
+            <p className="text-neutral-400 text-xs mt-1">
               Úsala para agrupar dentro de una categoría. Ejemplo: en Bebidas, puedes tener Cervezas, Cócteles y Tragos.
             </p>
           </div>
           <div>
             <input name="subcategoriaEn" placeholder="Subcategoría en inglés (opcional)" value={form.subcategoriaEn} onChange={handleChange}
               className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-base" />
-            <p className="text-neutral-600 text-xs mt-1">Si lo dejas vacío, se mostrará la subcategoría en español.</p>
+            <p className="text-neutral-400 text-xs mt-1">Si lo dejas vacío, se mostrará la subcategoría en español.</p>
           </div>
           <input name="orden" placeholder="Orden de aparición en menú (1, 2, 3…)" type="number" value={form.orden} onChange={handleChange}
             className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-base" />
@@ -964,7 +964,7 @@ export default function Admin() {
             <input key={fileKey} type="file" accept="image/*"
               onChange={(e) => setImagen(e.target.files[0])}
               className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-neutral-400 focus:outline-none focus:border-amber-400 text-base" />
-            <p className="text-neutral-600 text-xs mt-1">Máximo 3MB</p>
+            <p className="text-neutral-400 text-xs mt-1">Máximo 3MB</p>
           </div>
           <input name="imagenUrl" placeholder="O pega una URL de imagen" value={form.imagenUrl} onChange={handleChange}
             className="w-full bg-neutral-900 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400 text-base" />
@@ -1005,7 +1005,7 @@ export default function Admin() {
                   {p.categoria}{p.subcategoria ? ` › ${p.subcategoria}` : ''} — RD${p.precio}
                 </p>
                 {p.orden !== undefined && p.orden !== '' &&
-                  <p className="text-neutral-600 text-xs">Orden: {p.orden}</p>}
+                  <p className="text-neutral-400 text-xs">Orden: {p.orden}</p>}
               </div>
               <div className="flex gap-2 flex-wrap justify-end">
                 <button onClick={() => editar(p)}
@@ -1052,7 +1052,7 @@ export default function Admin() {
             quieras que aparezcan en el menú. Si no tocas nada aquí, todo sigue funcionando igual que hoy.
           </p>
           {categoriasAdmin.length === 0 ? (
-            <p className="text-neutral-600 text-xs">Agrega platos primero — las categorías aparecen aquí solas.</p>
+            <p className="text-neutral-400 text-xs">Agrega platos primero — las categorías aparecen aquí solas.</p>
           ) : (
             <div className="space-y-5">
               {categoriasAdmin.map((cat, i) => {
@@ -1245,7 +1245,7 @@ export default function Admin() {
                 {marcaForm.portadaUrl && !portadaFile && (
                   <img src={marcaForm.portadaUrl} alt="Portada actual" className="w-full max-w-xs h-24 object-cover mt-2 border border-neutral-700" />
                 )}
-                <p className="text-neutral-600 text-xs mt-1">Máximo 3MB. Sin foto, la portada usa un fondo oscuro sólido.</p>
+                <p className="text-neutral-400 text-xs mt-1">Máximo 3MB. Sin foto, la portada usa un fondo oscuro sólido.</p>
               </div>
               <div>
                 <label className="text-neutral-500 text-xs block mb-1">Eslogan</label>
@@ -1271,11 +1271,11 @@ export default function Admin() {
           {/* Horarios */}
           <div className="border-t border-neutral-800 pt-5 mt-5">
             <h3 className="text-neutral-300 text-sm font-semibold mb-1">Horarios</h3>
-            <p className="text-neutral-600 text-xs mb-3">
+            <p className="text-neutral-400 text-xs mb-3">
               Si cierras de madrugada, pon la hora de cierre del día siguiente (ej. abre 5:00 PM, cierra 2:00 AM).
               Deja un día sin horas para no restringir pedidos ese día.
             </p>
-            <p className="text-neutral-600 text-xs mb-1">
+            <p className="text-neutral-400 text-xs mb-1">
               Si cierras después de medianoche, las ventas de la madrugada se contarán en el día anterior. Ejemplo:
               si cierras a las 2:00 AM, una venta del lunes a la 1:00 AM aparecerá en tu reporte del domingo.
             </p>
@@ -1289,7 +1289,7 @@ export default function Admin() {
                   <input type="time" value={horariosForm[dia]?.abre || ''} disabled={horariosForm[dia]?.cerrado}
                     onChange={(e) => handleCambiarHorarioDia(dia, 'abre', e.target.value)}
                     className="bg-neutral-900 border border-neutral-700 px-2 py-2 text-white text-base focus:outline-none focus:border-amber-400 disabled:opacity-40 w-28" />
-                  <span className="text-neutral-600 text-xs">a</span>
+                  <span className="text-neutral-400 text-xs">a</span>
                   <input type="time" value={horariosForm[dia]?.cierra || ''} disabled={horariosForm[dia]?.cerrado}
                     onChange={(e) => handleCambiarHorarioDia(dia, 'cierra', e.target.value)}
                     className="bg-neutral-900 border border-neutral-700 px-2 py-2 text-white text-base focus:outline-none focus:border-amber-400 disabled:opacity-40 w-28" />
@@ -1299,7 +1299,7 @@ export default function Admin() {
                     Cerrado
                   </label>
                   <button type="button" onClick={() => handleAplicarATodos(dia)}
-                    className="text-xs text-neutral-600 hover:text-amber-400 transition-colors ml-auto">
+                    className="text-xs text-neutral-400 hover:text-amber-400 transition-colors ml-auto">
                     Aplicar a todos
                   </button>
                 </div>
@@ -1320,7 +1320,7 @@ export default function Admin() {
           {/* Botones */}
           <div className="border-t border-neutral-800 pt-5 mt-5">
             <h3 className="text-neutral-300 text-sm font-semibold mb-1">Botones de la portada</h3>
-            <p className="text-neutral-600 text-xs mb-3">
+            <p className="text-neutral-400 text-xs mb-3">
               Cada botón lleva su propio destino. Agrega los que quieras mostrar y llena a dónde debe llevar cada uno.
             </p>
             <div className="space-y-3">
@@ -1378,7 +1378,7 @@ export default function Admin() {
                 );
               })}
               {botonesForm.length === 0 && (
-                <p className="text-neutral-600 text-xs">Sin botones todavía. Agrega los que quieras mostrar en tu portada.</p>
+                <p className="text-neutral-400 text-xs">Sin botones todavía. Agrega los que quieras mostrar en tu portada.</p>
               )}
             </div>
             <div className="flex gap-3 mt-4">
@@ -1565,7 +1565,7 @@ export default function Admin() {
                   </span>
                   <div className="text-right">
                     <span className="text-amber-400 font-bold">RD${d.total}</span>
-                    <span className="text-neutral-600 text-xs ml-2">{d.cantidad} pedido{d.cantidad !== 1 ? 's' : ''}</span>
+                    <span className="text-neutral-400 text-xs ml-2">{d.cantidad} pedido{d.cantidad !== 1 ? 's' : ''}</span>
                   </div>
                 </div>
               ))}
@@ -1651,7 +1651,7 @@ export default function Admin() {
         <div className="mt-12 border-t border-neutral-800 pt-6 pb-8 text-center">
           <p className="text-neutral-700 text-xs mb-2">Tu identificador de usuario</p>
           <button onClick={copiarUid}
-            className="text-neutral-600 text-xs font-mono hover:text-amber-400 transition-colors break-all">
+            className="text-neutral-400 text-xs font-mono hover:text-amber-400 transition-colors break-all">
             {getUid()}
           </button>
           <p className="text-neutral-700 text-xs mt-1">Toca para copiar — compártelo con el maestro para que te asigne acceso</p>

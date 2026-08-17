@@ -152,7 +152,7 @@ function Carta() {
   }
 
   return (
-    <div className="min-h-screen bg-neutral-950 text-white font-serif">
+    <main className="min-h-screen bg-neutral-950 text-white font-serif">
 
       {/* Selector de idioma */}
       <div className="flex justify-end px-4 pt-3 bg-neutral-950">
@@ -203,7 +203,7 @@ function Carta() {
 
       {/* Aviso de impuestos */}
       {(impuestosConfig.itbisActivo || impuestosConfig.propinaActivo) && (
-        <p className="max-w-lg mx-auto px-4 text-neutral-600 text-xs mb-2">{t[lang].preciosSinImpuestos}</p>
+        <p className="max-w-lg mx-auto px-4 text-neutral-400 text-xs mb-2">{t[lang].preciosSinImpuestos}</p>
       )}
 
       {/* Resultados de búsqueda / Categorías / Lista de platos */}
@@ -234,11 +234,11 @@ function Carta() {
         <p className="text-neutral-400 text-sm leading-relaxed">{t[lang].cartaLlamadoAccion}</p>
       </div>
 
-      <p className="text-center text-neutral-600 mt-2 mb-10" style={{ fontSize: '12px' }}>
+      <p className="text-center text-neutral-400 mt-2 mb-10" style={{ fontSize: '12px' }}>
         {t[lang].creditoFooter}
       </p>
 
-    </div>
+    </main>
   );
 }
 

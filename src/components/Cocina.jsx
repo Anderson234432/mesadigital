@@ -399,7 +399,7 @@ function Cocina() {
                 />
               </div>
               {platos.length === 0 && (
-                <p className="text-neutral-600 text-sm px-4 py-4">Sin platos cargados.</p>
+                <p className="text-neutral-400 text-sm px-4 py-4">Sin platos cargados.</p>
               )}
               {[...platos]
                 .filter((p) => {
@@ -412,10 +412,10 @@ function Cocina() {
                   return (
                     <div key={p.id} className="flex justify-between items-center px-4 py-3">
                       <div>
-                        <p className={`text-sm font-semibold ${disponible ? 'text-white' : 'text-neutral-600 line-through'}`}>
+                        <p className={`text-sm font-semibold ${disponible ? 'text-white' : 'text-neutral-400 line-through'}`}>
                           {p.nombre}
                         </p>
-                        <p className="text-neutral-600 text-xs capitalize">{p.categoria}</p>
+                        <p className="text-neutral-400 text-xs capitalize">{p.categoria}</p>
                       </div>
                       <button
                         onClick={() => toggleDisponible(restauranteId, p.id, disponible)}
@@ -438,7 +438,7 @@ function Cocina() {
           <p className="text-neutral-700 text-xs mb-2">Tu identificador de usuario</p>
           <button
             onClick={async () => { try { await navigator.clipboard.writeText(getUid() || ''); } catch { /* intencional: fallback silencioso si el portapapeles falla */ } }}
-            className="text-neutral-600 text-xs font-mono hover:text-amber-400 transition-colors break-all">
+            className="text-neutral-400 text-xs font-mono hover:text-amber-400 transition-colors break-all">
             {getUid()}
           </button>
           <p className="text-neutral-700 text-xs mt-1">Toca para copiar</p>

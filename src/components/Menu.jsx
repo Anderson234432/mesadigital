@@ -465,7 +465,7 @@ function Menu() {
 
   // ─── Vista ────────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-neutral-950 text-white font-serif">
+    <main className="min-h-screen bg-neutral-950 text-white font-serif">
 
       {/* Selector de idioma */}
       <div className="flex justify-end px-4 pt-3 bg-neutral-950">
@@ -563,7 +563,7 @@ function Menu() {
 
       {/* Aviso de impuestos */}
       {(itbisActivo || propinaActivo) && (
-        <p className="max-w-lg mx-auto px-4 text-neutral-600 text-xs mb-2">{t[lang].preciosSinImpuestos}</p>
+        <p className="max-w-lg mx-auto px-4 text-neutral-400 text-xs mb-2">{t[lang].preciosSinImpuestos}</p>
       )}
 
       {/* Resultados de búsqueda / Categorías / Lista de platos */}
@@ -708,11 +708,11 @@ function Menu() {
         </div>
       )}
 
-      <p className="text-center text-neutral-600 mt-10 mb-24" style={{ fontSize: '12px' }}>
+      <p className="text-center text-neutral-400 mt-10 mb-24" style={{ fontSize: '12px' }}>
         {t[lang].creditoFooter}
       </p>
 
-    </div>
+    </main>
   );
 }
 

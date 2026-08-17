@@ -314,12 +314,12 @@ function PanelMaestro() {
                 <a href={`/restaurante/${r.id}`} target="_blank" rel="noreferrer" className="hover:underline">Portada →</a>
               </div>
               <div className="flex flex-wrap gap-2 items-center mb-4">
-                <span className="text-neutral-600 text-xs font-mono truncate max-w-[200px]">{urlCarta(r.id)}</span>
+                <span className="text-neutral-400 text-xs font-mono truncate max-w-[200px]">{urlCarta(r.id)}</span>
                 <button onClick={() => copiarUrlCarta(r.id)}
                   className="text-xs border border-neutral-600 text-neutral-400 px-2 py-1 hover:border-amber-400 hover:text-amber-400 transition-colors shrink-0 min-h-[32px]">
                   Copiar carta
                 </button>
-                <span className="text-neutral-600 text-xs font-mono truncate max-w-[200px]">{urlPortada(r.id)}</span>
+                <span className="text-neutral-400 text-xs font-mono truncate max-w-[200px]">{urlPortada(r.id)}</span>
                 <button onClick={() => copiarUrlPortada(r.id)}
                   className="text-xs border border-neutral-600 text-neutral-400 px-2 py-1 hover:border-amber-400 hover:text-amber-400 transition-colors shrink-0 min-h-[32px]">
                   Copiar portada
@@ -340,7 +340,7 @@ function PanelMaestro() {
                   <div>
                     <p className="text-xs text-amber-400 tracking-widest uppercase mb-2">Admins</p>
                     {(r.adminUids || []).length === 0
-                      ? <p className="text-neutral-600 text-xs mb-2">Sin admins asignados</p>
+                      ? <p className="text-neutral-400 text-xs mb-2">Sin admins asignados</p>
                       : (r.adminUids || []).map((uid) => (
                         <div key={uid} className="flex items-center justify-between mb-1">
                           <span className="text-neutral-400 text-xs font-mono truncate flex-1 mr-2">{uid}</span>
@@ -369,7 +369,7 @@ function PanelMaestro() {
                   <div>
                     <p className="text-xs text-amber-400 tracking-widest uppercase mb-2">Cocina</p>
                     {(r.cocinaUids || []).length === 0
-                      ? <p className="text-neutral-600 text-xs mb-2">Sin usuarios de cocina asignados</p>
+                      ? <p className="text-neutral-400 text-xs mb-2">Sin usuarios de cocina asignados</p>
                       : (r.cocinaUids || []).map((uid) => (
                         <div key={uid} className="flex items-center justify-between mb-1">
                           <span className="text-neutral-400 text-xs font-mono truncate flex-1 mr-2">{uid}</span>
@@ -431,7 +431,7 @@ function PanelMaestro() {
                     )}
 
                     {(invitacionesPorRestaurante[r.id] || []).length === 0 ? (
-                      <p className="text-neutral-600 text-xs">Sin invitaciones pendientes</p>
+                      <p className="text-neutral-400 text-xs">Sin invitaciones pendientes</p>
                     ) : (
                       invitacionesPorRestaurante[r.id].map((inv) => (
                         <div key={inv.id} className="flex items-center justify-between mb-1">
