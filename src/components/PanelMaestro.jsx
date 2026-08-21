@@ -14,6 +14,16 @@ function generarTokenMesa() {
     : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
+// El nombre del restaurante viene de Firestore y cualquier admin de ESE
+// restaurante puede escribirlo (las Rules no validan su contenido, solo el
+// rol) — sin escapar, un nombre malicioso ejecutaría JS en la ventana de
+// impresión de QR, que corre en el mismo origen que el resto de la app (con
+// la sesión del maestro activa). Mismo patrón que escaparHtml() en
+// functions/index.js y api/*-meta.js.
+function escaparHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
 function PanelMaestro() {
   const [restaurantes, setRestaurantes] = useState([]);
   const [nombre, setNombre] = useState('');
@@ -557,11 +567,12 @@ function PanelMaestro() {
                 const canvas = document.querySelector('#print-area canvas');
                 if (!canvas) return;
                 const url = canvas.toDataURL('image/png');
+                const nombreSeguro = escaparHtml(qrImprimiendo.nombreRestaurante);
                 const ventana = window.open('', '_blank', 'width=400,height=500');
                 ventana.document.write(`
                   <html><body style="margin:0;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:Georgia,serif;background:white">
                     <img src="${url}" style="width:220px;height:220px"/>
-                    <p style="margin-top:16px;font-size:13px;color:#666;letter-spacing:3px;text-transform:uppercase">${qrImprimiendo.nombreRestaurante}</p>
+                    <p style="margin-top:16px;font-size:13px;color:#666;letter-spacing:3px;text-transform:uppercase">${nombreSeguro}</p>
                     <p style="margin-top:8px;font-size:24px;font-weight:bold;color:#000;letter-spacing:4px;text-transform:uppercase">Mesa ${qrImprimiendo.mesa}</p>
                     <script>window.onload=()=>{window.print();window.onafterprint=()=>window.close()}</script>
                   </body></html>
