@@ -9,7 +9,8 @@
     "limpieza": "node limpieza.js",
     "correccion": "node clientes/correr.js",
     "carga": "node carga/carga.js",
-    "reporte": "node reporte/reporte.js"
+    "reporte": "node reporte/reporte.js",
+    "preflight": "node preflight/index.js"
   },
   "dependencies": {
     "firebase-admin": "^12.0.0",

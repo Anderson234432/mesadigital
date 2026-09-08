@@ -30,6 +30,7 @@ JSON crudos de las Fases 1 y 2.
 | `verificacion/cocina.js` | Abre `/cocina` con Playwright y lee las mesas visibles | Listo, verificado |
 | `carga/carga.js` | Carga directa (sin navegador) a `crearPedido`, niveles 10→50→100→500 concurrentes | Listo — punto de quiebre encontrado |
 | `reporte/reporte.js` | Sintetiza los JSON de Fase 1 y Fase 2 en el reporte final legible | Listo |
+| `preflight/` | Verificación previa a la entrega — infraestructura + un restaurante puntual + prueba de humo real opcional (`npm run preflight -- <restauranteId>`) | Listo, ver `preflight/README.md` |
 
 ## Hallazgos de Fase 1
 
